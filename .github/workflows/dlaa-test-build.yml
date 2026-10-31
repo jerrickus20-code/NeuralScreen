@@ -2,14 +2,17 @@ name: DLAA test build
 
 # A test patch for the dlaa branch: the worker built from this commit and the
 # Python files that changed, to extract over a NeuralScreen v2.6.4 install.
-# Push a tag named dlaa-test-* to build that commit and publish it as a
-# pre-release; "Run workflow" on the Actions tab builds it without publishing
-# (the zip is then a workflow artifact). The patch carries no NVIDIA runtime:
+# Push a tag named dlaa-test-*, or push the commit to the branch
+# dlaa-test-build (the tag is then dlaa-test-<run number>), to build it and
+# publish it as a pre-release; "Run workflow" on the Actions tab builds it
+# without publishing (the zip is then a workflow artifact). The patch carries no NVIDIA runtime:
 # NR and FG come from the v2.6.4 install, DLAA's nvngx_dlss.dll from the user.
 on:
   push:
     tags:
       - 'dlaa-test-*'
+    branches:
+      - dlaa-test-build
   workflow_dispatch:
 
 permissions:
@@ -31,7 +34,9 @@ jobs:
         shell: pwsh
         run: |
           $sha = $env:GITHUB_SHA
-          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "dlaa-test-$($sha.Substring(0, 8))" }
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME }
+                 elseif ($env:GITHUB_REF_NAME -eq 'dlaa-test-build') { "dlaa-test-$($env:GITHUB_RUN_NUMBER)" }
+                 else { "dlaa-test-$($sha.Substring(0, 8))" }
           $stage = Join-Path $env:RUNNER_TEMP 'patch'
           New-Item -ItemType Directory -Force -Path "$stage\app", "$stage\native\libraries" | Out-Null
           Copy-Item -Path 'app\*.py' -Destination "$stage\app"
@@ -61,7 +66,7 @@ jobs:
           path: ${{ steps.package.outputs.zip }}
 
       - name: Publish the pre-release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' || github.ref_name == 'dlaa-test-build'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
