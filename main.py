@@ -515,6 +515,10 @@ class _Pipeline:
         "gpu_switch_pending",
         "fg_alerted",
         "dlaa_alerted",
+        # The DLAA model last sent, as (worker pid, model), and what DLAA is
+        # doing according to the worker's lines (settings_io.refresh_dlaa_ok).
+        "dlaa_model_sent",
+        "dlaa_state",
         "gray_active",
         "mon_origin",
         "guide_fails",
@@ -1750,6 +1754,7 @@ def main() -> int:
             # pass, because the display is rebuilt with the window.
             commands.send_badge_state(st)
             commands.update_ui_protection(st)
+            commands.update_dlaa_model(st)
             commands.update_window_follow(st)
             if (not startup_pending and int(getattr(st, "nr_passes", 1)) > 1
                     and st.worker is not None

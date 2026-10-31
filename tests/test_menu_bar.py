@@ -2,7 +2,7 @@
 
 Mini mode kept a hand-picked subset of the panel's rows. The bar that
 replaced it (v2.6.0) is one row at the top of the screen: NR, FG and its step,
-Boost, the camera, a screenshot, a recording, the way back to the panel and
+DLAA, Boost, the camera, a screenshot, a recording, the way back to the panel and
 the collapse. It is meant to stay up through a game, which the open panel
 cannot: the panel takes the mouse across the whole screen and the keyboard
 with it.
@@ -91,7 +91,7 @@ def main() -> int:
 
         # 1. What the bar holds, and what its clicks do.
         order = [(i.kind, i.key) for i in sorted(menu.items, key=lambda i: i.rect.x)]
-        want = [("tile", "nr"), ("tile", "frame_generation"), ("tile", "boost"),
+        want = [("tile", "nr"), ("tile", "frame_generation"), ("tile", "dlaa"), ("tile", "boost"),
                 ("tile", "lens"), ("button", "screenshot"), ("button", "record"),
                 ("icon", "mini"), ("icon", "min")]
         print(f"    bar: {[k for _, k in order]}, {menu.panel_rect.size}")
@@ -108,6 +108,9 @@ def main() -> int:
         boost = next(i for i in menu.items if i.key == "boost")
         if menu._activate_item(boost) != [("toggle", "boost")]:
             failures.append("the Boost button is not the Boost switch")
+        dlaa = next(i for i in menu.items if i.key == "dlaa")
+        if menu._activate_item(dlaa) != [("toggle", "dlaa")]:
+            failures.append("the DLAA button is not the DLAA switch")
 
         # 2. The handle moves the bar, not the panel.
         handle = menu._title_bar.center

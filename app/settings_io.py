@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import re
 import math
 import os
 import sys
@@ -386,6 +387,8 @@ CONFIG_SCHEMA_VERSION = 1
 # Processing-rate limiter.  The named modes are stable config values; custom
 # remains a separate number so switching to 30/60 and back does not erase it.
 FRAME_LIMIT_MODES = ("30", "60", "custom", "unlimited")
+#: DLAA's DLSS model: the runtime's own choice first, then NVIDIA's presets.
+DLAA_MODELS = ("auto", "J", "K", "L", "M")
 FRAME_LIMIT_CUSTOM_MIN = 15
 FRAME_LIMIT_CUSTOM_MAX = 240
 
@@ -661,6 +664,7 @@ def _validate_config(cfg: dict) -> dict:
     cfg["nr_preset"] = nr_preset(cfg)
     cfg["frame_generation"] = bool(cfg.get("frame_generation", False))
     cfg["dlaa"] = bool(cfg.get("dlaa", False))
+    cfg["dlaa_model"] = _choice(cfg, "dlaa_model", DLAA_MODELS)
     try:
         cfg["frame_multiplier"] = min(FG_MULTIPLIER_MAX, max(2, int(cfg.get("frame_multiplier", 2))))
     except (ValueError, TypeError, OverflowError):
@@ -1306,6 +1310,7 @@ def _menu_layout_payload(cfg: dict, params: dict, monitor: int, lang: str,
         "frame_generation": bool(cfg.get("frame_generation", False)),
         "frame_multiplier": min(FG_MULTIPLIER_MAX, max(2, int(cfg.get("frame_multiplier", 2)))),
         "dlaa": bool(cfg.get("dlaa", False)),
+        "dlaa_model": _choice(cfg, "dlaa_model", DLAA_MODELS),
         "frame_limit_mode": (str(cfg.get("frame_limit_mode", "unlimited"))
                              if str(cfg.get("frame_limit_mode", "unlimited"))
                              in FRAME_LIMIT_MODES else "unlimited"),
@@ -1443,13 +1448,50 @@ def dlaa_verdict(lines):
     return None
 
 
+_DLAA_ENABLED = re.compile(
+    r"\[dlaa\] enabled at (\d+)x(\d+) \(frame \d+x\d+(, Boost)?[^)]*\), motion \S+, "
+    r"preset (\S), (direct|NGX Core)")
+
+
+def dlaa_state_from_logs(lines, previous=None) -> dict | None:
+    """What DLAA is doing, from the worker's lines NEWEST FIRST.
+
+    {"state": "starting"} after the switch-on, {"state": "running", "size",
+    "boost", "model", "core"} once it runs, {"state": "failed", "reason":
+    "missing" | "hdr" | "refused"} after a refusal, {"state": "off"} after the
+    switch-off. The newest line that says one of those wins; with none in the
+    window (a long session pushes them out) the previous state stands.
+    """
+    for line in lines:
+        if "[dlaa]" not in line:
+            continue
+        m = _DLAA_ENABLED.search(line)
+        if m:
+            return {"state": "running", "size": f"{m.group(1)}×{m.group(2)}",
+                    "boost": bool(m.group(3)),
+                    "model": "" if m.group(4) == "-" else m.group(4),
+                    "core": m.group(5) == "NGX Core"}
+        if "[dlaa] off:" in line:
+            reason = ("hdr" if "HDR" in line else
+                      "missing" if "not found" in line else "refused")
+            return {"state": "failed", "reason": reason}
+        if "[dlaa] UI: on" in line or "[dlaa] model:" in line:
+            return {"state": "starting"}
+        if "[dlaa] UI: off" in line:
+            return {"state": "off"}
+    return previous
+
+
 def refresh_dlaa_ok(st) -> None:
     """The DLAA switch reflects reality, the way the FG switch does (#76).
 
-    DLAA needs NVIDIA's nvngx_dlss.dll, which is not bundled; without it, or
-    when the runtime refuses, the switch goes back off with an alert naming
-    the usual reason. Once per attempt: switching it on again re-arms it.
+    Keeps st.dlaa_state current for the line under the switch, and when the
+    worker refuses - no nvngx_dlss.dll, HDR on, a runtime or driver that says
+    no - puts the switch back off with an alert that names which of those it
+    was. Once per attempt: switching it on again re-arms it.
     """
+    st.dlaa_state = dlaa_state_from_logs(reversed(st.worker_logs[-200:]),
+                                         getattr(st, "dlaa_state", None))
     if not bool(st.cfg.get("dlaa", False)):
         return
     if getattr(st, "dlaa_alerted", False):
@@ -1459,10 +1501,16 @@ def refresh_dlaa_ok(st) -> None:
     st.dlaa_alerted = True
     st.cfg["dlaa"] = False
     save_menu_layout(st)
-    st.display.alert(UI_STRINGS[st.lang].get(
-        "dlaa_fail",
-        "DLAA could not start - put nvngx_dlss.dll into native\\libraries\\ "
-        "(SDR only)"), 8.0)
+    reason = (st.dlaa_state or {}).get("reason", "missing")
+    key, fallback = {
+        "hdr": ("dlaa_fail_hdr", "DLAA works with HDR off only - the switch is back off"),
+        "refused": ("dlaa_fail_refused",
+                    "DLAA could not start on this GPU or driver - details in NeuralScreen.log"),
+    }.get(reason, ("dlaa_fail",
+                   "DLAA could not start - put nvngx_dlss.dll into native\\libraries\\ "
+                   "(SDR only)"))
+    # Eight seconds, like FG's: the reason it will not appear at all.
+    st.display.alert(UI_STRINGS[st.lang].get(key, fallback), 8.0)
 
 
 # FG's own refusal lines, the same shape as NR's: the worker says what the
@@ -1858,6 +1906,10 @@ def menu_payload(st) -> dict:
         "frame_generation": bool(st.cfg.get("frame_generation", False)),
         "frame_multiplier": min(FG_MULTIPLIER_MAX, max(2, int(st.cfg.get("frame_multiplier", 2)))),
         "dlaa": bool(st.cfg.get("dlaa", False)),
+        "dlaa_model": _choice(st.cfg, "dlaa_model", DLAA_MODELS),
+        # What DLAA is doing, from the worker's own lines: shown under the
+        # switch (refresh_dlaa_ok keeps it current).
+        "dlaa_status": dict(getattr(st, "dlaa_state", None) or {}),
         # The step the presenter is REALLY running, when the runtime refused
         # the requested one and the worker stepped down (issue #100). None
         # until the worker says so; the panel marks the difference so the

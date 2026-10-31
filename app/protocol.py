@@ -841,6 +841,21 @@ def lens_flags(enabled: bool, bend: bool = True, vignette: float = 0.0,
             | step(sensor) << LENS_SHIFT_SENSOR)
 
 
+# DLAP: DLAA's model (native/dlaa.inl), no reply. The header alone: the
+# model rides in the index field - 0 for the runtime's own choice, else NGX's
+# preset value (J=10 .. M=13). A worker without DLAA does not know the magic,
+# so it is only sent to a worker that answered for DLAA (see commands).
+DLAA_PRESET_MAGIC = 0x50414C44   # 'DLAP'
+DLAA_MODELS = {"auto": 0, "J": 10, "K": 11, "L": 12, "M": 13}
+
+
+def send_dlaa_model(worker: subprocess.Popen, model: str, pts: int = 0) -> None:
+    """DLAP: the DLSS model DLAA uses from its next frame ("auto" - the runtime's)."""
+    worker.stdin.write(struct.pack(FRAME_FMT, DLAA_PRESET_MAGIC,
+                                   DLAA_MODELS.get(model, 0), 0, 0, int(pts)))
+    worker.stdin.flush()
+
+
 def send_ui_rects(worker: subprocess.Popen, rects, pts: int = 0) -> None:
     """UIRC: where FG shows the real frame's pixels; an empty list - nowhere."""
     rects = list(rects)[:UI_RECTS_MAX]

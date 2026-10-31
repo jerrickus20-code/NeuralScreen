@@ -708,6 +708,30 @@ def _hotkey_owner(st, parsed, cmd: str) -> str | None:
     return None
 
 
+def update_dlaa_model(st) -> None:
+    """DLAA's model to the worker, once per worker and once per change.
+
+    Only to a worker that has spoken about DLAA: the message is new, and an
+    older worker that does not know it would read it as a broken frame.
+    """
+    worker = getattr(st, "worker", None)
+    if worker is None or worker.poll() is not None:
+        return
+    model = str(st.cfg.get("dlaa_model", "auto"))
+    if model not in settings_io.DLAA_MODELS:
+        model = "auto"
+    sent = (worker.pid, model)
+    if getattr(st, "dlaa_model_sent", None) == sent:
+        return
+    if not any("[dlaa]" in line for line in st.worker_logs[-400:]):
+        return
+    try:
+        protocol.send_dlaa_model(worker, model)
+        st.dlaa_model_sent = sent
+    except Exception as exc:
+        print(f"[main] the DLAA model did not reach the worker ({exc})", file=sys.stderr)
+
+
 def update_ui_protection(st) -> None:
     """Frame Generation's interface protection, once per frame (v2.6.0).
 
@@ -1243,6 +1267,13 @@ def apply_menu_action(st, action: tuple) -> None:
         if st.cfg.get("frame_generation"):
             st.fg_alerted = False
         settings_io.save_menu_layout(st)
+    elif kind == "dlaa_model":
+        # The worker gets it on the next pass of the loop (update_dlaa_model),
+        # and rebuilds DLAA with it - also on a desktop that is not changing.
+        if str(action[1]) in settings_io.DLAA_MODELS:
+            st.cfg["dlaa_model"] = str(action[1])
+            settings_io.save_menu_layout(st)
+            print(f"[main] DLAA model: {st.cfg['dlaa_model']}")
     elif kind == "frame_limit_mode":
         mode = str(action[1])
         if mode in settings_io.FRAME_LIMIT_MODES:
@@ -2008,6 +2039,16 @@ def drain_commands(st) -> bool:
                 st.display.alert(UI_STRINGS[st.lang].get(
                     "fg_on" if state else "fg_off",
                     "DLSS FG ON" if state else "DLSS FG OFF"))
+            elif cmd == "dlaa":
+                # DLAA on/off from the keyboard: no key by default, the user
+                # picks one in the key list. The menu switch's own path, so
+                # the config, the alert re-arm and the frame bits match.
+                apply_menu_action(st, ("toggle", "dlaa"))
+                state = bool(st.cfg.get("dlaa", False))
+                st.display.menu.set_state({"dlaa": state})
+                st.display.alert(UI_STRINGS[st.lang].get(
+                    "dlaa_on" if state else "dlaa_off",
+                    "DLAA ON" if state else "DLAA OFF"))
             elif cmd == "lens":
                 # The camera on/off from the keyboard (#164): the menu
                 # switch's own path - the config, the menu state and the one

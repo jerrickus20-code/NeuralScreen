@@ -82,9 +82,9 @@ the menu. The hotkeys are on the numpad, so **Num Lock has to be on**.
 | **Num5** | capture the window under the cursor |
 | **Ctrl+Alt+Q** | quit |
 
-Every key can be reassigned in the menu, under the sliders icon. While the
-menu is open it takes the mouse and keyboard, so it works on top of a game;
-closed, clicks go straight through it.
+Every key can be reassigned under the sliders icon, and DLAA can be given one
+there (it has none by default). While the menu is open it takes the mouse and
+keyboard, so it works on top of a game; closed, clicks go through it.
 
 ### Whole screen or one window
 
@@ -98,7 +98,7 @@ that keeps the focus 2.5 s. Minimising the window pauses processing.
 
 ## The menu
 
-Four tiles on top (NR, FG, Boost, Camera), the profile, then fold-outs: Network,
+Five tiles on top (NR, FG, DLAA, Boost, Camera), the profile, then fold-outs: Network,
 Fine tuning, Camera, Colour, Source and comparison. The bar icon folds the panel
 into a bar at the top that stays over a game. The dot is green while NR runs.
 
@@ -138,7 +138,7 @@ into a bar at the top that stays over a game. The dot is green while NR runs.
 Behind the sliders icon: monitor/GPU, HDR, media folders, file conversion,
 Spout2, REC indicator, frame counter, tray, keys, keyboard navigation,
 **Notifications**, **Process priority**, **Scale**, theme, **12** languages.
-**Network**: frame limit and **DLAA** (opt-in, SDR, needs `nvngx_dlss.dll`).
+**Network**: frame limit, **DLAA**'s live status and model (SDR, `nvngx_dlss.dll`).
 
 ## Swapping a runtime
 

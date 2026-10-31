@@ -114,6 +114,7 @@ NEUTRAL_CHOICE = {
 HOTKEY_ROWS = (
     ("toggle", "hk_nr"),
     ("framegen", "hk_framegen"),
+    ("dlaa", "hk_dlaa"),
     ("lens", "hk_lens"),
     ("settings", "hk_menu"),
     ("screenshot_menu", "hk_shot"),
@@ -392,6 +393,8 @@ class OverlayMenu:
             "frame_generation": False,
             "frame_multiplier": 2,
             "dlaa": False,
+            "dlaa_model": "auto",
+            "dlaa_status": {},
             # The step the presenter really runs, when it differs from the
             # pick above (issue #100: a refused 4x steps down to 2x).
             "frame_multiplier_active": None,
@@ -2050,7 +2053,7 @@ class OverlayMenu:
                     # a full PAD on top of that was the second hole.
                     cy += act_h + self._u(6)
         else:
-            # The main page (v2.6.0, redesign B): the four switches people
+            # The main page (v2.6.0, redesign B): the five switches people
             # reach for during a game as tiles, the profile and its strength,
             # then four fold-outs for the rest. The page it replaced ran to
             # 1356 px at 100% - past a 1080p screen - and the camera added
@@ -2061,6 +2064,7 @@ class OverlayMenu:
             multiplier = int(self.state.get("frame_multiplier", 2))
             boost = bool(self.state.get("nr_small"))
             lens_on = bool(self.state.get("lens"))
+            dlaa_on = bool(self.state.get("dlaa"))
             on_s = s.get("tile_on", "On")
             off_s = s.get("tile_off", "Off")
             tile_gap = self._u(8)
@@ -2068,6 +2072,9 @@ class OverlayMenu:
             tiles = (("nr", "NR", on_s if nr_on else off_s, nr_on),
                      ("frame_generation", "FG",
                       f"×{multiplier}" if fg else off_s, fg),
+                     # DLAA beside FG: the other DLSS pass, switched while a
+                     # game runs as often as FG is.
+                     ("dlaa", "DLAA", on_s if dlaa_on else off_s, dlaa_on),
                      ("boost", s["boost"], on_s if boost else off_s, boost),
                      ("lens", s["lens"], on_s if lens_on else off_s, lens_on))
             tile_w = (inner_w - tile_gap * (len(tiles) - 1)) // len(tiles)
@@ -2143,16 +2150,22 @@ class OverlayMenu:
                 if passes_now > 1:
                     net_bits.append(f"{s.get('nr_passes', 'NR passes')} {passes_now}")
             net_bits.append(limit_labels.get(limit_mode, limit_mode))
-            dlaa_on = bool(self.state.get("dlaa"))
             if dlaa_on:
                 net_bits.insert(0, "DLAA")
             if fold("net", s.get("fold_net", "Network"),
                     " · ".join(b for b in net_bits if b)):
                 # DLAA (native/dlaa.inl): DLSS anti-aliasing of every captured
-                # frame, NR on or off. Here rather than among the tiles: the
-                # main page's height is budgeted, and the fold's summary still
-                # says when it is on.
-                toggle("dlaa", "DLAA", dlaa_on)
+                # frame, NR on or off. The tile above switches it; here it
+                # says what it is doing, and the model is chosen.
+                toggle("dlaa", "DLAA", dlaa_on, hint=self._dlaa_hint(s, dlaa_on))
+                model_labels = [s.get("dlaa_model_auto", "Auto"),
+                                s.get("dlaa_model_j", "J"), s.get("dlaa_model_k", "K")]
+                model_labels += [s.get("dlaa_model_new", "{letter}").format(letter=letter)
+                                 for letter in ("L", "M")]
+                choice("dlaa_model", s.get("dlaa_model", "DLAA model"),
+                       str(self.state.get("dlaa_model", "auto")),
+                       ["auto", "J", "K", "L", "M"], labels=model_labels,
+                       hint=s.get("dlaa_model_hint", ""))
                 # FG's interface protection (v2.6.0): the real frame's pixels
                 # where a still HUD sits over a moving picture. Off by default
                 # until it is measured on more games.
@@ -4751,12 +4764,37 @@ class OverlayMenu:
 
     # -- redesign B / C (v2.6.0) ----------------------------------------------
 
+    def _dlaa_hint(self, s: dict, on: bool) -> str:
+        """The line under the DLAA switch: what it does, or what it is doing.
+
+        From settings_io.dlaa_state_from_logs via the payload's dlaa_status:
+        starting, running (the size it runs at, Boost's or the frame's, the
+        model, and "via the NVIDIA driver" when NGX Core answered), or why
+        the last attempt did not start. Off and never refused: what it is for.
+        """
+        status = self.state.get("dlaa_status") or {}
+        state = status.get("state")
+        if on and state == "running":
+            key = "dlaa_hint_running_boost" if status.get("boost") else "dlaa_hint_running"
+            text = s.get(key, "running · {size} · model {model}").format(
+                size=status.get("size", ""),
+                model=status.get("model") or s.get("dlaa_auto", "auto"))
+            if status.get("core"):
+                text += " · " + s.get("dlaa_hint_driver", "via the NVIDIA driver")
+            return text
+        if on:
+            return s.get("dlaa_hint_starting", "starting…")
+        if state == "failed":
+            return s.get({"hdr": "dlaa_hint_hdr", "refused": "dlaa_hint_refused"}.get(
+                status.get("reason"), "dlaa_hint_missing"), "")
+        return s.get("dlaa_hint_off", "")
+
     def _layout_bar(self, screen_w: int, screen_h: int) -> None:
         """The collapsed menu (redesign C): one row at the top of the screen.
 
         It replaced mini mode, which kept a hand-picked subset of the panel's
         rows: the bar holds the switches a game is played with - NR, FG and
-        its step, Boost, the camera - the two capture actions, and the way
+        its step, DLAA, Boost, the camera - the two capture actions, and the way
         back to the full panel. Nothing in it changes on its own (no live
         rate), so the HUD layer under it is not redrawn while it is on screen
         (#166: every redraw of that layer costs the compositor a frame).
@@ -4771,6 +4809,7 @@ class OverlayMenu:
         multiplier = int(self.state.get("frame_multiplier", 2))
         tiles = (("nr", "NR", bool(self.state.get("nr"))),
                  ("frame_generation", f"FG ×{multiplier}" if fg else "FG", fg),
+                 ("dlaa", "DLAA", bool(self.state.get("dlaa"))),
                  ("boost", s["boost"], bool(self.state.get("nr_small"))),
                  ("lens", s["lens"], bool(self.state.get("lens"))))
         items: list[Item] = []

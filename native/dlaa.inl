@@ -103,6 +103,7 @@ static struct DlaaState {
     UINT w = 0, height = 0;   // the render size (DLSS's input and output)
     UINT fw = 0, fh = 0;      // the frame's size
     UINT mw = 0, mh = 0;      // the motion field's size
+    unsigned preset = 0;      // the model the feature was created with
     bool boost = false;
     // The interface rectangles the mask was last drawn from (count 0: none).
     uint32_t mask_count = UINT32_MAX;
@@ -127,18 +128,25 @@ static bool DlaaRequested()
     return (g_dlaa_ui_enabled < 0 ? requested : g_dlaa_ui_enabled != 0) && !g_dlaa.failed;
 }
 
-// NS_DLAA_PRESET=J|K|L|M: the DLSS model for DLAA. Unset: the runtime's own
-// choice (K, the transformer model, on the 310 runtimes). Read once.
+// The model the menu picked (DLAP): 0 = the runtime's own choice, else the
+// NGX preset value (J..M); -1 until a client sends one.
+static int g_dlaa_preset_ui = -1;
+
+// The DLSS model for DLAA: the menu's choice, else NS_DLAA_PRESET=J|K|L|M
+// (read once), else the runtime's own (K, the transformer model, on 310.x).
 static unsigned DlaaPreset()
 {
-    static const unsigned preset = [] {
+    static const unsigned from_env = [] {
         char value[8] = {};
         if (GetEnvironmentVariableA("NS_DLAA_PRESET", value, sizeof(value)) != 1) return 0u;
         const char letter = static_cast<char>(value[0] & ~0x20);
         if (letter < 'J' || letter > 'M') return 0u;
         return static_cast<unsigned>(NVSDK_NGX_DLSS_Hint_Render_Preset_J) + (letter - 'J');
     }();
-    return preset;
+    if (g_dlaa_preset_ui < 0) return from_env;
+    const unsigned ui = static_cast<unsigned>(g_dlaa_preset_ui);
+    return (ui >= NVSDK_NGX_DLSS_Hint_Render_Preset_J && ui <= NVSDK_NGX_DLSS_Hint_Render_Preset_M)
+        ? ui : 0u;
 }
 
 // Put the capture back where DLAA's result was: the switch went off, or DLAA
@@ -381,7 +389,7 @@ static bool CreateDlaaFeature()
     p->Set(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags,
            static_cast<int>(NVSDK_NGX_DLSS_Feature_Flags_MVLowRes));
     p->Set(NVSDK_NGX_Parameter_DLSS_Enable_Output_Subrects, 0);
-    if (DlaaPreset() != 0) p->Set(NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA, DlaaPreset());
+    if (g_dlaa.preset != 0) p->Set(NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA, g_dlaa.preset);
     if (!BeginCommands()) return false;
     const auto result = DlaaCreateGuarded(g_dlaa.create, h.list, p, &g_dlaa.feature);
     if (g_dlaa_fault != 0)
@@ -412,7 +420,7 @@ static bool EnsureDlaa(VideoState &v)
     const UINT w = boost ? v.w : fw, height = boost ? v.hgt : fh;
     if (g_dlaa.feature && g_dlaa.fw == fw && g_dlaa.fh == fh && g_dlaa.mw == v.w &&
         g_dlaa.mh == v.hgt && g_dlaa.boost == boost && g_dlaa.bound_color == v.color.tex &&
-        g_dlaa.bound_mv == v.mv.tex) return true;
+        g_dlaa.bound_mv == v.mv.tex && g_dlaa.preset == DlaaPreset()) return true;
     DlaaRestoreRaw(v);
     CloseDlaaResources();
     if (!LoadDlaaRuntime(v)) return false;
@@ -426,6 +434,7 @@ static bool EnsureDlaa(VideoState &v)
     }
     g_dlaa.w = w; g_dlaa.height = height; g_dlaa.fw = fw; g_dlaa.fh = fh;
     g_dlaa.mw = v.w; g_dlaa.mh = v.hgt; g_dlaa.boost = boost;
+    g_dlaa.preset = DlaaPreset();
     if (!CreateDlaaFeature())
     {
         // The direct runtime said no (not a fault): NGX Core gets one try.
@@ -479,7 +488,7 @@ static bool EnsureDlaa(VideoState &v)
     { DlaaRefuse(v, "the GPU did not finish setting DLAA up"); return false; }
     // The flat plane is on the GPU now; its staging copy (33 MB at 4K) goes.
     g_dlaa.depth.upload->Release(); g_dlaa.depth.upload = nullptr;
-    const unsigned preset = DlaaPreset();
+    const unsigned preset = g_dlaa.preset;
     Log("[dlaa] enabled at %ux%u (frame %ux%u%s), motion %ux%u, preset %c, %s; flat depth and "
         "estimated motion", w, height, fw, fh, boost ? ", Boost: composed onto the native frame" : "",
         v.w, v.hgt, preset ? static_cast<char>('A' + preset - 1) : '-',
@@ -561,8 +570,11 @@ static bool RunDlaa(VideoState &v, bool color_written, bool still, bool reset)
     if (color_written) g_dlaa.color_is_result = false;
     g_dlaa_raw_shown = nullptr;
     if (!DlaaRequested() || !v.color_in_srv || !v.inputs_ready) return true;
-    // Nothing new, and the frame on screen is DLAA's already.
-    if (!color_written && g_dlaa.color_is_result)
+    // Nothing new, and the frame on screen is DLAA's already - unless the
+    // model changed, which has to show on a still desktop too (EnsureDlaa
+    // puts the capture back and the new model runs on it).
+    const bool model_changed = g_dlaa.feature != nullptr && g_dlaa.preset != DlaaPreset();
+    if (!color_written && g_dlaa.color_is_result && !model_changed)
     {
         g_dlaa_raw_shown = g_dlaa.raw;
         return true;

@@ -2622,18 +2622,18 @@ STRINGS["zh"].update({"dim_on_rebuild": '重建时变暗'})
 STRINGS["ja"].update({"dim_on_rebuild": '再構築中は暗くする'})
 STRINGS["ko"].update({"dim_on_rebuild": '재구성 중 어둡게'})
 # FG interface protection (v2.6.0).
-STRINGS["en"].update({"fg_ui_protect": 'Protect the interface in FG/DLAA', "fg_ui_protect_hint": 'still HUD and text keep the real frame'})
-STRINGS["ru"].update({"fg_ui_protect": 'Защита интерфейса в FG/DLAA', "fg_ui_protect_hint": 'неподвижный HUD и текст берутся из реального кадра'})
-STRINGS["fr"].update({"fg_ui_protect": "Protéger l'interface en FG/DLAA", "fg_ui_protect_hint": "le HUD fixe et le texte restent ceux de l'image réelle"})
-STRINGS["de"].update({"fg_ui_protect": 'Oberfläche in FG/DLAA schützen', "fg_ui_protect_hint": 'festes HUD und Text bleiben aus dem echten Bild'})
-STRINGS["es"].update({"fg_ui_protect": 'Proteger la interfaz en FG/DLAA', "fg_ui_protect_hint": 'el HUD fijo y el texto salen del fotograma real'})
-STRINGS["it"].update({"fg_ui_protect": "Proteggi l'interfaccia in FG/DLAA", "fg_ui_protect_hint": 'HUD fisso e testo restano quelli del frame reale'})
-STRINGS["pt"].update({"fg_ui_protect": 'Proteger a interface no FG/DLAA', "fg_ui_protect_hint": 'HUD fixo e texto vêm do quadro real'})
-STRINGS["pl"].update({"fg_ui_protect": 'Ochrona interfejsu w FG/DLAA', "fg_ui_protect_hint": 'nieruchomy HUD i tekst z prawdziwej klatki'})
-STRINGS["uk"].update({"fg_ui_protect": 'Захист інтерфейсу у FG/DLAA', "fg_ui_protect_hint": 'нерухомий HUD і текст беруться зі справжнього кадру'})
-STRINGS["zh"].update({"fg_ui_protect": 'FG/DLAA 界面保护', "fg_ui_protect_hint": '静止的 HUD 和文字取自真实帧'})
-STRINGS["ja"].update({"fg_ui_protect": 'FG/DLAA でインターフェースを保護', "fg_ui_protect_hint": '静止した HUD と文字は実フレームのまま'})
-STRINGS["ko"].update({"fg_ui_protect": 'FG/DLAA 인터페이스 보호', "fg_ui_protect_hint": '고정 HUD와 텍스트는 실제 프레임 사용'})
+STRINGS["en"].update({"fg_ui_protect": 'Protect the interface in FG/DLAA', "fg_ui_protect_hint": 'a still HUD and text are not smeared by motion'})
+STRINGS["ru"].update({"fg_ui_protect": 'Защита интерфейса в FG/DLAA', "fg_ui_protect_hint": 'неподвижный HUD и текст не размазываются движением'})
+STRINGS["fr"].update({"fg_ui_protect": "Protéger l'interface en FG/DLAA", "fg_ui_protect_hint": 'le HUD fixe et le texte ne sont pas étalés par le mouvement'})
+STRINGS["de"].update({"fg_ui_protect": 'Oberfläche in FG/DLAA schützen', "fg_ui_protect_hint": 'festes HUD und Text werden nicht von Bewegung verschmiert'})
+STRINGS["es"].update({"fg_ui_protect": 'Proteger la interfaz en FG/DLAA', "fg_ui_protect_hint": 'el HUD fijo y el texto no se emborronan con el movimiento'})
+STRINGS["it"].update({"fg_ui_protect": "Proteggi l'interfaccia in FG/DLAA", "fg_ui_protect_hint": 'HUD fisso e testo non vengono sbavati dal movimento'})
+STRINGS["pt"].update({"fg_ui_protect": 'Proteger a interface no FG/DLAA', "fg_ui_protect_hint": 'HUD fixo e texto não são borrados pelo movimento'})
+STRINGS["pl"].update({"fg_ui_protect": 'Ochrona interfejsu w FG/DLAA', "fg_ui_protect_hint": 'nieruchomy HUD i tekst nie są rozmazywane ruchem'})
+STRINGS["uk"].update({"fg_ui_protect": 'Захист інтерфейсу у FG/DLAA', "fg_ui_protect_hint": 'нерухомий HUD і текст не розмазуються рухом'})
+STRINGS["zh"].update({"fg_ui_protect": 'FG/DLAA 界面保护', "fg_ui_protect_hint": '静止的 HUD 和文字不会被运动拖糊'})
+STRINGS["ja"].update({"fg_ui_protect": 'FG/DLAA でインターフェースを保護', "fg_ui_protect_hint": '静止した HUD と文字が動きでにじまない'})
+STRINGS["ko"].update({"fg_ui_protect": 'FG/DLAA 인터페이스 보호', "fg_ui_protect_hint": '고정 HUD와 텍스트가 움직임에 번지지 않음'})
 # Redesign B (v2.6.0): the state tiles and the fold-out headers.
 STRINGS["en"].update({"tile_on": "On", "tile_off": "Off", "fold_net": "Network", "fold_tune": "Fine tuning", "fold_source": "Source and comparison"})
 STRINGS["ru"].update({"tile_on": "Вкл", "tile_off": "Выкл", "fold_net": "Сеть", "fold_tune": "Тонкая настройка", "fold_source": "Источник и сравнение"})
@@ -4013,3 +4013,229 @@ _DLAA_STRINGS = {
 for _lang, _text in _DLAA_STRINGS.items():
     STRINGS[_lang]["dlaa_fail"] = _text
 del _lang, _text
+
+# DLAA's controls (menu: the tile, the Network block, the key list): the
+# hotkey's name and alerts, the model picker, the line under the switch that
+# says what DLAA is doing (settings_io.dlaa_state_from_logs), and the alerts
+# for the two refusals that are not a missing DLL.
+_DLAA_UI_STRINGS = {
+    "en": {
+        "hk_dlaa": "DLAA on/off", "dlaa_on": "DLAA ON", "dlaa_off": "DLAA OFF",
+        "dlaa_model": "DLAA model", "dlaa_model_auto": "Auto (runtime's choice)",
+        "dlaa_model_j": "J – less ghosting, more flicker", "dlaa_model_k": "K – sharpest",
+        "dlaa_model_new": "{letter} – newer model, heavier",
+        "dlaa_model_hint": "Auto uses K on current runtimes; L and M cost more",
+        "dlaa_auto": "auto",
+        "dlaa_hint_off": "smooths jagged edges and shimmer · SDR only",
+        "dlaa_hint_starting": "starting…",
+        "dlaa_hint_running": "running · {size} · model {model}",
+        "dlaa_hint_running_boost": "running at Boost size {size} · model {model}",
+        "dlaa_hint_driver": "via the NVIDIA driver",
+        "dlaa_hint_missing": "did not start: nvngx_dlss.dll is missing",
+        "dlaa_hint_hdr": "did not start: turn HDR off first",
+        "dlaa_hint_refused": "did not start - details in NeuralScreen.log",
+        "dlaa_fail_hdr": "DLAA works with HDR off only - the switch is back off",
+        "dlaa_fail_refused": "DLAA could not start on this GPU or driver - details in NeuralScreen.log",
+    },
+    "ru": {
+        "hk_dlaa": "DLAA вкл/выкл", "dlaa_on": "DLAA ВКЛ", "dlaa_off": "DLAA ВЫКЛ",
+        "dlaa_model": "Модель DLAA", "dlaa_model_auto": "Авто (выбор рантайма)",
+        "dlaa_model_j": "J – меньше шлейфов, больше мерцания", "dlaa_model_k": "K – самая чёткая",
+        "dlaa_model_new": "{letter} – новая модель, тяжелее",
+        "dlaa_model_hint": "Авто — это K на текущих рантаймах; L и M дороже",
+        "dlaa_auto": "авто",
+        "dlaa_hint_off": "сглаживает лесенки и мерцание · только SDR",
+        "dlaa_hint_starting": "запускается…",
+        "dlaa_hint_running": "работает · {size} · модель {model}",
+        "dlaa_hint_running_boost": "работает в размере Boost {size} · модель {model}",
+        "dlaa_hint_driver": "через драйвер NVIDIA",
+        "dlaa_hint_missing": "не запустился: нет nvngx_dlss.dll",
+        "dlaa_hint_hdr": "не запустился: сначала выключите HDR",
+        "dlaa_hint_refused": "не запустился — подробности в NeuralScreen.log",
+        "dlaa_fail_hdr": "DLAA работает только с выключенным HDR — переключатель выключен",
+        "dlaa_fail_refused": "DLAA не запустился на этой видеокарте или драйвере — подробности в NeuralScreen.log",
+    },
+    "uk": {
+        "hk_dlaa": "DLAA увімк/вимк", "dlaa_on": "DLAA УВІМК", "dlaa_off": "DLAA ВИМК",
+        "dlaa_model": "Модель DLAA", "dlaa_model_auto": "Авто (вибір рантайму)",
+        "dlaa_model_j": "J – менше шлейфів, більше мерехтіння", "dlaa_model_k": "K – найчіткіша",
+        "dlaa_model_new": "{letter} – новіша модель, важча",
+        "dlaa_model_hint": "Авто — це K на поточних рантаймах; L і M дорожчі",
+        "dlaa_auto": "авто",
+        "dlaa_hint_off": "згладжує сходинки й мерехтіння · лише SDR",
+        "dlaa_hint_starting": "запускається…",
+        "dlaa_hint_running": "працює · {size} · модель {model}",
+        "dlaa_hint_running_boost": "працює в розмірі Boost {size} · модель {model}",
+        "dlaa_hint_driver": "через драйвер NVIDIA",
+        "dlaa_hint_missing": "не запустився: немає nvngx_dlss.dll",
+        "dlaa_hint_hdr": "не запустився: спершу вимкніть HDR",
+        "dlaa_hint_refused": "не запустився — деталі в NeuralScreen.log",
+        "dlaa_fail_hdr": "DLAA працює лише з вимкненим HDR — перемикач вимкнено",
+        "dlaa_fail_refused": "DLAA не запустився на цій відеокарті чи драйвері — деталі в NeuralScreen.log",
+    },
+    "fr": {
+        "hk_dlaa": "DLAA marche/arrêt", "dlaa_on": "DLAA activé", "dlaa_off": "DLAA désactivé",
+        "dlaa_model": "Modèle DLAA", "dlaa_model_auto": "Auto (choix du runtime)",
+        "dlaa_model_j": "J – moins de traînées, plus de scintillement", "dlaa_model_k": "K – le plus net",
+        "dlaa_model_new": "{letter} – modèle plus récent, plus lourd",
+        "dlaa_model_hint": "Auto utilise K sur les runtimes actuels ; L et M coûtent plus",
+        "dlaa_auto": "auto",
+        "dlaa_hint_off": "lisse le crénelage et le scintillement · SDR seulement",
+        "dlaa_hint_starting": "démarrage…",
+        "dlaa_hint_running": "actif · {size} · modèle {model}",
+        "dlaa_hint_running_boost": "actif à la taille Boost {size} · modèle {model}",
+        "dlaa_hint_driver": "via le pilote NVIDIA",
+        "dlaa_hint_missing": "n'a pas démarré : nvngx_dlss.dll manque",
+        "dlaa_hint_hdr": "n'a pas démarré : désactivez d'abord le HDR",
+        "dlaa_hint_refused": "n'a pas démarré - détails dans NeuralScreen.log",
+        "dlaa_fail_hdr": "DLAA ne fonctionne qu'avec le HDR désactivé - l'interrupteur est revenu sur arrêt",
+        "dlaa_fail_refused": "DLAA n'a pas pu démarrer sur ce GPU ou ce pilote - détails dans NeuralScreen.log",
+    },
+    "de": {
+        "hk_dlaa": "DLAA an/aus", "dlaa_on": "DLAA AN", "dlaa_off": "DLAA AUS",
+        "dlaa_model": "DLAA-Modell", "dlaa_model_auto": "Auto (Wahl der Runtime)",
+        "dlaa_model_j": "J – weniger Schlieren, mehr Flimmern", "dlaa_model_k": "K – am schärfsten",
+        "dlaa_model_new": "{letter} – neueres Modell, aufwendiger",
+        "dlaa_model_hint": "Auto nutzt K bei aktuellen Runtimes; L und M kosten mehr",
+        "dlaa_auto": "auto",
+        "dlaa_hint_off": "glättet Treppenstufen und Flimmern · nur SDR",
+        "dlaa_hint_starting": "startet…",
+        "dlaa_hint_running": "läuft · {size} · Modell {model}",
+        "dlaa_hint_running_boost": "läuft in Boost-Größe {size} · Modell {model}",
+        "dlaa_hint_driver": "über den NVIDIA-Treiber",
+        "dlaa_hint_missing": "nicht gestartet: nvngx_dlss.dll fehlt",
+        "dlaa_hint_hdr": "nicht gestartet: zuerst HDR ausschalten",
+        "dlaa_hint_refused": "nicht gestartet - Details in NeuralScreen.log",
+        "dlaa_fail_hdr": "DLAA läuft nur mit ausgeschaltetem HDR - der Schalter ist wieder aus",
+        "dlaa_fail_refused": "DLAA konnte auf dieser GPU oder diesem Treiber nicht starten - Details in NeuralScreen.log",
+    },
+    "es": {
+        "hk_dlaa": "DLAA sí/no", "dlaa_on": "DLAA activado", "dlaa_off": "DLAA desactivado",
+        "dlaa_model": "Modelo DLAA", "dlaa_model_auto": "Auto (elige el runtime)",
+        "dlaa_model_j": "J – menos estelas, más parpadeo", "dlaa_model_k": "K – el más nítido",
+        "dlaa_model_new": "{letter} – modelo más nuevo, más pesado",
+        "dlaa_model_hint": "Auto usa K en los runtimes actuales; L y M cuestan más",
+        "dlaa_auto": "auto",
+        "dlaa_hint_off": "suaviza dientes de sierra y parpadeo · solo SDR",
+        "dlaa_hint_starting": "iniciando…",
+        "dlaa_hint_running": "activo · {size} · modelo {model}",
+        "dlaa_hint_running_boost": "activo al tamaño de Boost {size} · modelo {model}",
+        "dlaa_hint_driver": "a través del controlador NVIDIA",
+        "dlaa_hint_missing": "no se inició: falta nvngx_dlss.dll",
+        "dlaa_hint_hdr": "no se inició: apague primero el HDR",
+        "dlaa_hint_refused": "no se inició - detalles en NeuralScreen.log",
+        "dlaa_fail_hdr": "DLAA solo funciona con el HDR apagado - el interruptor volvió a apagarse",
+        "dlaa_fail_refused": "DLAA no pudo iniciarse en esta GPU o controlador - detalles en NeuralScreen.log",
+    },
+    "it": {
+        "hk_dlaa": "Attiva/disattiva DLAA", "dlaa_on": "DLAA attivo", "dlaa_off": "DLAA disattivato",
+        "dlaa_model": "Modello DLAA", "dlaa_model_auto": "Auto (sceglie il runtime)",
+        "dlaa_model_j": "J – meno scie, più sfarfallio", "dlaa_model_k": "K – il più nitido",
+        "dlaa_model_new": "{letter} – modello più recente, più pesante",
+        "dlaa_model_hint": "Auto usa K con i runtime attuali; L e M costano di più",
+        "dlaa_auto": "auto",
+        "dlaa_hint_off": "smussa scalettature e sfarfallio · solo SDR",
+        "dlaa_hint_starting": "avvio…",
+        "dlaa_hint_running": "attivo · {size} · modello {model}",
+        "dlaa_hint_running_boost": "attivo alla dimensione Boost {size} · modello {model}",
+        "dlaa_hint_driver": "tramite il driver NVIDIA",
+        "dlaa_hint_missing": "non avviato: manca nvngx_dlss.dll",
+        "dlaa_hint_hdr": "non avviato: disattiva prima l'HDR",
+        "dlaa_hint_refused": "non avviato - dettagli in NeuralScreen.log",
+        "dlaa_fail_hdr": "DLAA funziona solo con l'HDR disattivato - l'interruttore è tornato su off",
+        "dlaa_fail_refused": "DLAA non è partito su questa GPU o driver - dettagli in NeuralScreen.log",
+    },
+    "pt": {
+        "hk_dlaa": "Ligar/desligar DLAA", "dlaa_on": "DLAA ligado", "dlaa_off": "DLAA desligado",
+        "dlaa_model": "Modelo DLAA", "dlaa_model_auto": "Auto (escolha do runtime)",
+        "dlaa_model_j": "J – menos rastros, mais cintilação", "dlaa_model_k": "K – o mais nítido",
+        "dlaa_model_new": "{letter} – modelo mais novo, mais pesado",
+        "dlaa_model_hint": "Auto usa K nos runtimes atuais; L e M custam mais",
+        "dlaa_auto": "auto",
+        "dlaa_hint_off": "suaviza serrilhado e cintilação · só SDR",
+        "dlaa_hint_starting": "iniciando…",
+        "dlaa_hint_running": "ativo · {size} · modelo {model}",
+        "dlaa_hint_running_boost": "ativo no tamanho do Boost {size} · modelo {model}",
+        "dlaa_hint_driver": "pelo driver da NVIDIA",
+        "dlaa_hint_missing": "não iniciou: falta nvngx_dlss.dll",
+        "dlaa_hint_hdr": "não iniciou: desligue o HDR primeiro",
+        "dlaa_hint_refused": "não iniciou - detalhes em NeuralScreen.log",
+        "dlaa_fail_hdr": "O DLAA só funciona com o HDR desligado - o interruptor voltou a desligar",
+        "dlaa_fail_refused": "O DLAA não pôde iniciar nesta GPU ou driver - detalhes em NeuralScreen.log",
+    },
+    "pl": {
+        "hk_dlaa": "DLAA wł./wył.", "dlaa_on": "DLAA wł.", "dlaa_off": "DLAA wył.",
+        "dlaa_model": "Model DLAA", "dlaa_model_auto": "Auto (wybór runtime'u)",
+        "dlaa_model_j": "J – mniej smużenia, więcej migotania", "dlaa_model_k": "K – najostrzejszy",
+        "dlaa_model_new": "{letter} – nowszy model, cięższy",
+        "dlaa_model_hint": "Auto używa K w obecnych runtime'ach; L i M kosztują więcej",
+        "dlaa_auto": "auto",
+        "dlaa_hint_off": "wygładza schodki i migotanie · tylko SDR",
+        "dlaa_hint_starting": "uruchamianie…",
+        "dlaa_hint_running": "działa · {size} · model {model}",
+        "dlaa_hint_running_boost": "działa w rozmiarze Boost {size} · model {model}",
+        "dlaa_hint_driver": "przez sterownik NVIDIA",
+        "dlaa_hint_missing": "nie uruchomił się: brak nvngx_dlss.dll",
+        "dlaa_hint_hdr": "nie uruchomił się: najpierw wyłącz HDR",
+        "dlaa_hint_refused": "nie uruchomił się - szczegóły w NeuralScreen.log",
+        "dlaa_fail_hdr": "DLAA działa tylko z wyłączonym HDR - przełącznik jest znowu wyłączony",
+        "dlaa_fail_refused": "DLAA nie uruchomił się na tym GPU lub sterowniku - szczegóły w NeuralScreen.log",
+    },
+    "zh": {
+        "hk_dlaa": "DLAA 开/关", "dlaa_on": "DLAA 开", "dlaa_off": "DLAA 关",
+        "dlaa_model": "DLAA 模型", "dlaa_model_auto": "自动（由运行时选择）",
+        "dlaa_model_j": "J – 拖影更少，闪烁更多", "dlaa_model_k": "K – 最清晰",
+        "dlaa_model_new": "{letter} – 较新模型，开销更大",
+        "dlaa_model_hint": "自动在当前运行时上使用 K；L 和 M 开销更大",
+        "dlaa_auto": "自动",
+        "dlaa_hint_off": "平滑锯齿和闪烁 · 仅限 SDR",
+        "dlaa_hint_starting": "正在启动…",
+        "dlaa_hint_running": "运行中 · {size} · 模型 {model}",
+        "dlaa_hint_running_boost": "以 Boost 尺寸 {size} 运行 · 模型 {model}",
+        "dlaa_hint_driver": "通过 NVIDIA 驱动",
+        "dlaa_hint_missing": "未启动：缺少 nvngx_dlss.dll",
+        "dlaa_hint_hdr": "未启动：请先关闭 HDR",
+        "dlaa_hint_refused": "未启动 - 详情见 NeuralScreen.log",
+        "dlaa_fail_hdr": "DLAA 仅在关闭 HDR 时可用 - 开关已关闭",
+        "dlaa_fail_refused": "DLAA 无法在此显卡或驱动上启动 - 详情见 NeuralScreen.log",
+    },
+    "ja": {
+        "hk_dlaa": "DLAA オン/オフ", "dlaa_on": "DLAA オン", "dlaa_off": "DLAA オフ",
+        "dlaa_model": "DLAA モデル", "dlaa_model_auto": "自動（ランタイムが選択）",
+        "dlaa_model_j": "J – 残像が少なく、ちらつきが多い", "dlaa_model_k": "K – 最も鮮明",
+        "dlaa_model_new": "{letter} – 新しいモデル、より重い",
+        "dlaa_model_hint": "自動は現行ランタイムで K を使用。L と M は負荷が高い",
+        "dlaa_auto": "自動",
+        "dlaa_hint_off": "ジャギーとちらつきを滑らかに · SDR のみ",
+        "dlaa_hint_starting": "起動中…",
+        "dlaa_hint_running": "動作中 · {size} · モデル {model}",
+        "dlaa_hint_running_boost": "Boost サイズ {size} で動作中 · モデル {model}",
+        "dlaa_hint_driver": "NVIDIA ドライバー経由",
+        "dlaa_hint_missing": "起動しませんでした：nvngx_dlss.dll がありません",
+        "dlaa_hint_hdr": "起動しませんでした：先に HDR をオフにしてください",
+        "dlaa_hint_refused": "起動しませんでした - 詳細は NeuralScreen.log",
+        "dlaa_fail_hdr": "DLAA は HDR オフでのみ動作します - スイッチはオフに戻りました",
+        "dlaa_fail_refused": "この GPU またはドライバーでは DLAA を起動できませんでした - 詳細は NeuralScreen.log",
+    },
+    "ko": {
+        "hk_dlaa": "DLAA 켜기/끄기", "dlaa_on": "DLAA 켜짐", "dlaa_off": "DLAA 꺼짐",
+        "dlaa_model": "DLAA 모델", "dlaa_model_auto": "자동(런타임 선택)",
+        "dlaa_model_j": "J – 잔상 적음, 깜빡임 많음", "dlaa_model_k": "K – 가장 선명",
+        "dlaa_model_new": "{letter} – 최신 모델, 더 무거움",
+        "dlaa_model_hint": "자동은 현재 런타임에서 K 사용; L과 M은 부담이 큼",
+        "dlaa_auto": "자동",
+        "dlaa_hint_off": "계단 현상과 깜빡임을 부드럽게 · SDR 전용",
+        "dlaa_hint_starting": "시작 중…",
+        "dlaa_hint_running": "실행 중 · {size} · 모델 {model}",
+        "dlaa_hint_running_boost": "Boost 크기 {size}에서 실행 중 · 모델 {model}",
+        "dlaa_hint_driver": "NVIDIA 드라이버 경유",
+        "dlaa_hint_missing": "시작 안 됨: nvngx_dlss.dll 없음",
+        "dlaa_hint_hdr": "시작 안 됨: 먼저 HDR을 끄세요",
+        "dlaa_hint_refused": "시작 안 됨 - 자세한 내용은 NeuralScreen.log",
+        "dlaa_fail_hdr": "DLAA는 HDR을 끈 상태에서만 동작합니다 - 스위치가 다시 꺼졌습니다",
+        "dlaa_fail_refused": "이 GPU 또는 드라이버에서 DLAA를 시작할 수 없습니다 - 자세한 내용은 NeuralScreen.log",
+    },
+}
+for _lang, _extra in _DLAA_UI_STRINGS.items():
+    STRINGS[_lang].update(_extra)
+del _lang, _extra

@@ -1132,8 +1132,18 @@ frame's neural pass.
 
 The switch rides on every frame in the header's bits 6-7 (`FRAME_FLAG_DLAA_SET`
 / `FRAME_FLAG_DLAA`), like FG's; an older client sends neither and `NS_DLAA=1`
-decides. `NS_DLAA_PRESET=J|K|L|M` picks the DLSS model (unset: the runtime's
-own choice for DLAA, K on 310.x). Every refusal is logged as `[dlaa] off: ...`
+decides. The model is the menu's **DLAA model** (Auto, J, K, L, M), sent as a
+`DLAP` message of its own (the header alone, the NGX preset in `index`; message
+17, no reply) once per worker and once per change; a new model rebuilds DLAA
+and shows on a still desktop too. Without one from the client,
+`NS_DLAA_PRESET=J|K|L|M` decides, and without that the runtime (K on 310.x).
+
+**In the menu.** A DLAA tile beside FG on the main page and in the collapsed
+bar; under **Network** the switch, a line saying what DLAA is doing - starting,
+running at which size and model (and "via the NVIDIA driver" when NGX Core
+answered), or why the last attempt did not start - read from the worker's
+`[dlaa]` lines, and the model picker. A hotkey exists with no key: the user
+gives it one under Keys (`hotkeys.OPTIONAL_COMMANDS`). Every refusal is logged as `[dlaa] off: ...`
 - a missing DLL, a refused create, a caught fault, HDR - and the client turns
 the switch back off once per attempt with an alert, the way it does for FG
 (#76). Success is `[dlaa] enabled at WxH ...`, naming the route.

@@ -123,6 +123,14 @@ DEFAULT_BINDINGS = {
     12: (MOD_NOREPEAT, VK_NUMPAD[8], "lens", "Num8"),
 }
 
+#: Commands that exist without a key: the user gives them one in the menu's
+#: key list (it shows "—" until then). DLAA has no default because the numpad
+#: block is full and a key taken from every program should be the user's own
+#: choice, not ours. id -> command; the ids continue DEFAULT_BINDINGS'.
+OPTIONAL_COMMANDS = {
+    13: "dlaa",
+}
+
 # Key name -> VK (for parsing the config)
 _KEY_NAMES = {
     "F1": 0x70, "F2": 0x71, "F3": 0x72, "F4": 0x73, "F5": 0x74,
@@ -235,6 +243,17 @@ def build_bindings(overrides: dict | None = None) -> dict:
             continue
         new_mods, new_vk = parsed
         bindings[hk_id] = (new_mods, new_vk, cmd, text)
+    # The optional commands get a binding only when the user gave them a key.
+    for hk_id, cmd in OPTIONAL_COMMANDS.items():
+        text = overrides.get(cmd)
+        if not isinstance(text, str) or not text.strip() or \
+                text.strip().lower() in UNBIND_WORDS:
+            continue
+        parsed = parse_binding(text)
+        if parsed is None:
+            print(f"[hotkeys] {cmd}: {text!r} cannot be a global hotkey - left unbound")
+            continue
+        bindings[hk_id] = (parsed[0], parsed[1], cmd, text)
     return bindings
 
 

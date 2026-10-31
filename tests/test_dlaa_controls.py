@@ -13,6 +13,8 @@ NVIDIA's nvngx_dlss.dll - so this guards the wiring around it:
   and the worker's [dlaa] lines reach the log at all;
 * the interface protection sends its rectangles for DLAA as for FG, and the
   worker hands them to DLSS as the current-colour bias mask;
+* the GUI: the DLAA tile, the model picker and its DLAP message, the line
+  under the switch for each state, the hotkey with no default key;
 * the worker keeps what the review asked of it: four allocators for the extra
   submission, the raw capture put back when DLAA goes off, the NGX Core
   fallback, Boost's work-size pass, the still-picture hold.
@@ -133,7 +135,7 @@ def main() -> int:
             ("kDlaaStillEvaluations", "a still picture is evaluated forever"),
             ("g_residual_pso", "Boost does not compose onto the native frame"),
             ("g_dlaa.depth.upload->Release();", "the depth staging buffer is kept"),
-            ("static const unsigned preset = [", "the preset is read every frame")):
+            ("static const unsigned from_env = [", "NS_DLAA_PRESET is read every frame")):
         if needle not in dlaa:
             failures.append(f"dlaa.inl: {why}")
     # The off switch puts the capture back before the textures go.
@@ -194,6 +196,88 @@ def main() -> int:
         failures.append("config.default.json does not ship DLAA off")
     if settings_io._validate_config(dict(shipped, dlaa="yes")).get("dlaa") is not True:
         failures.append("dlaa is not normalised to a bool")
+
+    # 7. The GUI: the tile, the model picker, the line under the switch, the
+    #    hotkey, and the model reaching the worker.
+    menu = build()
+    paint(menu)
+    tile = find(menu, "tile", "dlaa")
+    if tile is None or click(menu, tile) != [("toggle", "dlaa")]:
+        failures.append("no DLAA tile on the main page, or it is not the switch")
+    picker = find(menu, "choice", "dlaa_model")
+    if picker is None:
+        failures.append("no DLAA model picker in the Network block")
+    elif list(picker.payload or []) != list(settings_io.DLAA_MODELS):
+        failures.append(f"the model picker offers {picker.payload}")
+    st = SimpleNamespace(cfg={"dlaa_model": "auto"})
+    with patch.object(settings_io, "save_menu_layout"):
+        commands.apply_menu_action(st, ("dlaa_model", "K"))
+        commands.apply_menu_action(st, ("dlaa_model", "Z"))
+    if st.cfg["dlaa_model"] != "K":
+        failures.append("picking a model does not set it, or a bad one is taken")
+
+    def hint_for(state):
+        menu.set_state(state)
+        paint(menu)
+        row = find(menu, "toggle", "dlaa")
+        return str(row.extra.get("hint", "")) if row else ""
+    running = hint_for({"dlaa": True, "dlaa_status": {
+        "state": "running", "size": "2496×1404", "boost": True, "model": "", "core": True}})
+    for part in ("2496×1404", "Boost", "auto", "NVIDIA driver"):
+        if part not in running:
+            failures.append(f"the running line {running!r} does not say {part!r}")
+    if "starting" not in hint_for({"dlaa": True, "dlaa_status": {}}):
+        failures.append("switched on with no answer yet must say starting")
+    if "nvngx_dlss.dll" not in hint_for({"dlaa": False, "dlaa_status": {
+            "state": "failed", "reason": "missing"}}):
+        failures.append("a missing DLL is not named under the switch")
+    if "HDR" not in hint_for({"dlaa": False, "dlaa_status": {"state": "failed", "reason": "hdr"}}):
+        failures.append("HDR is not named under the switch")
+    if "SDR" not in hint_for({"dlaa": False, "dlaa_status": {"state": "off"}}):
+        failures.append("off, the line does not say what DLAA is for")
+
+    parse = settings_io.dlaa_state_from_logs
+    got = parse(["[dlaa] enabled at 3840x2160 (frame 3840x2160), motion 2496x1404, "
+                 "preset K, direct; flat depth and estimated motion", "[dlaa] UI: on"])
+    if got != {"state": "running", "size": "3840×2160", "boost": False, "model": "K",
+               "core": False}:
+        failures.append(f"the running line parses as {got}")
+    if parse(["[dlaa] off: the HDR presentation shows ..."]) != {"state": "failed", "reason": "hdr"}:
+        failures.append("an HDR refusal is not told apart")
+    if parse(["[host] nothing about DLAA"], {"state": "running"}) != {"state": "running"}:
+        failures.append("with no DLAA line in the window the last state must stand")
+
+    import hotkeys
+    import overlay_ui
+    if any(cmd == "dlaa" for *_x, cmd, _n in hotkeys.build_bindings({}).values()):
+        failures.append("DLAA must have no key until the user gives it one")
+    if not any(cmd == "dlaa" for *_x, cmd, _n in hotkeys.build_bindings({"dlaa": "F9"}).values()):
+        failures.append("a key given to DLAA is not bound")
+    if "dlaa" not in [cmd for cmd, _label in overlay_ui.HOTKEY_ROWS]:
+        failures.append("DLAA is not in the menu's key list")
+    if 'elif cmd == "dlaa":' not in (ROOT / "app" / "commands.py").read_text(encoding="utf-8"):
+        failures.append("the DLAA hotkey command is not handled")
+
+    worker = SimpleNamespace(stdin=io.BytesIO())
+    protocol.send_dlaa_model(worker, "M")
+    if struct.unpack(protocol.FRAME_FMT, worker.stdin.getvalue()) != (
+            protocol.DLAA_PRESET_MAGIC, 13, 0, 0, 0):
+        failures.append("DLAP does not carry the model in the index field")
+    m = re.search(r"DLAA_PRESET_MAGIC\s*=\s*(0x[0-9A-Fa-f]+)u;", host)
+    if m is None or int(m.group(1), 16) != protocol.DLAA_PRESET_MAGIC:
+        failures.append("the worker's DLAP magic differs from protocol.py")
+    sent_models = []
+    st = SimpleNamespace(cfg={"dlaa_model": "L"}, worker_logs=["[host] up"],
+                         worker=SimpleNamespace(pid=5, poll=lambda: None))
+    with patch.object(protocol, "send_dlaa_model", lambda w, model: sent_models.append(model)):
+        commands.update_dlaa_model(st)                 # no [dlaa] line yet: an old worker?
+        st.worker_logs.append("[dlaa] UI: off")
+        commands.update_dlaa_model(st)
+        commands.update_dlaa_model(st)                 # unchanged: not again
+        st.cfg["dlaa_model"] = "K"
+        commands.update_dlaa_model(st)
+    if sent_models != ["L", "K"]:
+        failures.append(f"the model is sent {sent_models}, not once per worker and change")
 
     for f in failures:
         print("FAIL:", f)

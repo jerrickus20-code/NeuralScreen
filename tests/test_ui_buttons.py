@@ -400,6 +400,7 @@ def main() -> int:
     if seg is None:
         failures.append("no source segment on the main page")
     else:
+        seg = into_view(menu, seg)
         cells = seg.extra.get("cells") or []
         if len(cells) != 2:
             failures.append(f"the source segment has {len(cells)} cells")
@@ -424,6 +425,8 @@ def main() -> int:
         menu.layout(3840, 2160)
         paint(menu)
         seg = find(menu, "segmented", "source")
+        if seg is not None:
+            seg = into_view(menu, seg)
         cells = (seg.extra.get("cells") or []) if seg else []
         if cells:
             out = menu.handle_event(pygame.event.Event(

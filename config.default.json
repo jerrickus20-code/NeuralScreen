@@ -24,6 +24,7 @@
   "frame_generation": false,
   "frame_multiplier": 2,
   "dlaa": false,
+  "dlaa_model": "auto",
   "frame_limit_mode": "unlimited",
   "frame_limit_custom": 90,
   "record_audio": true,

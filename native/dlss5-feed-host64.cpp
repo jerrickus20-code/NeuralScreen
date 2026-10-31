@@ -1955,6 +1955,7 @@ static constexpr uint32_t LENS_MAGIC         = 0x534E454Cu; // "LENS" -- client 
 static constexpr uint32_t LENS_ACK_MAGIC     = 0x4B414E4Cu; // "LNAK" -- worker -> client reply to LENS
 static constexpr uint32_t BADGE_MAGIC        = 0x47444142u; // "BADG" -- client -> worker: the rate badge's mapping (no reply)
 static constexpr uint32_t UI_RECTS_MAGIC     = 0x43524955u; // "UIRC" -- client -> worker: FG's still-interface rectangles (no reply)
+static constexpr uint32_t DLAA_PRESET_MAGIC  = 0x50414C44u; // "DLAP" -- client -> worker: DLAA's model in `index` (no reply)
 static constexpr uint32_t PER_PASS_FLAG_ENABLED = 0x1u;     // passes 2+ use this set; clear = main set for every pass
 static constexpr uint32_t DDA_MAGIC        = 0x31414444u; // "DDA1" -- client -> worker: worker takes over capture
 static constexpr uint32_t DDA_ACK_MAGIC    = 0x4B434144u; // "DACK" -- worker -> client reply to DDA1
@@ -7245,6 +7246,17 @@ static int ReadVideoMessage(VideoState &v, VideoFrameHeader &fh, std::vector<BYT
         g_ui_rects = cmd;
         return 16;
     }
+    if (fh.magic == DLAA_PRESET_MAGIC)
+    {
+        // DLAA's model (dlaa.inl): the header alone, the value in `index`.
+        static const char *const kModels[] = { "J", "K", "L", "M" };
+        if (static_cast<int>(fh.index) != g_dlaa_preset_ui)
+            Log("[dlaa] model: %s", fh.index == 0 ? "the runtime's choice"
+                : fh.index >= 10 && fh.index <= 13 ? kModels[fh.index - 10]
+                : "unknown - the runtime's choice");
+        g_dlaa_preset_ui = static_cast<int>(fh.index);
+        return 17;
+    }
     if (fh.magic == BADGE_MAGIC)
     {
         BYTE *p = reinterpret_cast<BYTE *>(&g_badge_cmd);
@@ -7599,7 +7611,7 @@ static int RunVideo()
         // frame. Missing it here sent every PPRM through the "not prepared"
         // path and threw away the frame that was ready.
         if (msg != 1 && msg != 10 && msg != 11 && msg != 12 && msg != 13 && msg != 14 &&
-            msg != 15 && msg != 16) prepared = false;
+            msg != 15 && msg != 16 && msg != 17) prepared = false;
         // A command may change what the network makes. CAP1 (10) does not: it
         // only latches the capture the next FRM1 consumes, and on the CPU
         // motion path it precedes every frame - counting it here kept the
@@ -7608,6 +7620,7 @@ static int RunVideo()
         // output, and the held result is exactly what it bends.
         // BADG (15) neither: the badge goes on the presented picture only.
         // UIRC (16) neither: it changes only what FG shows between real frames.
+        // DLAP (17) does: a new DLAA model changes the picture NR holds.
         if (msg != 1 && msg != 10 && msg != 14 && msg != 15 && msg != 16)
         { g_still_evals = 0; StabForget(); }
         if (msg < 0) return 11;   // protocol desync: not a clean end of input
@@ -7928,6 +7941,7 @@ static int RunVideo()
             continue;
         }
         if (msg == 16) continue;   // UIRC: taken in ReadVideoMessage, no reply
+        if (msg == 17) continue;   // DLAP: taken in ReadVideoMessage, no reply
         if (msg == 15)
         {
             // BADG: where the client keeps the rate badge (badge.inl). No
