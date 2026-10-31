@@ -3993,3 +3993,23 @@ _AUDIT_STRINGS = {
 for _lang, _extra in _AUDIT_STRINGS.items():
     STRINGS[_lang].update(_extra)
 del _lang, _extra
+
+# DLAA (native/dlaa.inl): the alert when the switch goes back off. The usual
+# reason is the runtime nobody has put in place yet, so the alert names it.
+_DLAA_STRINGS = {
+    "en": "DLAA could not start - put nvngx_dlss.dll into native\\libraries\\ (SDR only)",
+    "ru": "DLAA не запустился - положите nvngx_dlss.dll в native\\libraries\\ (только SDR)",
+    "fr": "DLAA n'a pas pu démarrer - placez nvngx_dlss.dll dans native\\libraries\\ (SDR uniquement)",
+    "de": "DLAA konnte nicht starten - nvngx_dlss.dll nach native\\libraries\\ legen (nur SDR)",
+    "es": "DLAA no pudo iniciarse - coloque nvngx_dlss.dll en native\\libraries\\ (solo SDR)",
+    "it": "DLAA non è partito - metti nvngx_dlss.dll in native\\libraries\\ (solo SDR)",
+    "pt": "O DLAA não pôde iniciar - coloque nvngx_dlss.dll em native\\libraries\\ (somente SDR)",
+    "pl": "DLAA nie uruchomił się - umieść nvngx_dlss.dll w native\\libraries\\ (tylko SDR)",
+    "uk": "DLAA не запустився - покладіть nvngx_dlss.dll у native\\libraries\\ (лише SDR)",
+    "zh": "DLAA 无法启动 - 请将 nvngx_dlss.dll 放入 native\\libraries\\（仅限 SDR）",
+    "ja": "DLAA を開始できませんでした - nvngx_dlss.dll を native\\libraries\\ に置いてください（SDR のみ）",
+    "ko": "DLAA를 시작할 수 없습니다 - nvngx_dlss.dll 을 native\\libraries\\ 에 넣으세요 (SDR 전용)",
+}
+for _lang, _text in _DLAA_STRINGS.items():
+    STRINGS[_lang]["dlaa_fail"] = _text
+del _lang, _text

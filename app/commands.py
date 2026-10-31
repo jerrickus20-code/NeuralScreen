@@ -1223,6 +1223,14 @@ def apply_menu_action(st, action: tuple) -> None:
         if st.cfg["frame_generation"]:
             st.fg_alerted = False
         settings_io.save_menu_layout(st)
+    elif kind == "toggle" and action[1] == "dlaa":
+        # No worker command: the switch rides on every frame (FRAME_FLAG_DLAA)
+        # and the worker builds or drops the feature when it changes.
+        st.cfg["dlaa"] = not bool(st.cfg.get("dlaa", False))
+        if st.cfg["dlaa"]:
+            st.dlaa_alerted = False
+        settings_io.save_menu_layout(st)
+        print(f"[main] DLAA: {'on' if st.cfg['dlaa'] else 'off'}")
     elif kind == "frame_multiplier":
         st.cfg["frame_multiplier"] = min(settings_io.FG_MULTIPLIER_MAX, max(2, int(action[1])))
         # A different multiplier is a fresh attempt at the feature: if the

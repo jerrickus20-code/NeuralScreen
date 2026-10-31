@@ -660,6 +660,7 @@ def _validate_config(cfg: dict) -> dict:
               f"a or b; using 'default'", file=sys.stderr)
     cfg["nr_preset"] = nr_preset(cfg)
     cfg["frame_generation"] = bool(cfg.get("frame_generation", False))
+    cfg["dlaa"] = bool(cfg.get("dlaa", False))
     try:
         cfg["frame_multiplier"] = min(FG_MULTIPLIER_MAX, max(2, int(cfg.get("frame_multiplier", 2))))
     except (ValueError, TypeError, OverflowError):
@@ -987,7 +988,7 @@ def _validate_config(cfg: dict) -> dict:
 #: The config switches read as booleans (config.default.json holds each one).
 _BOOL_KEYS = (
     "fullscreen", "worker_present", "motion_on_gpu", "capture_in_worker",
-    "pixels_in_shm", "nr_small", "nr_direct", "frame_generation",
+    "pixels_in_shm", "nr_small", "nr_direct", "frame_generation", "dlaa",
     "record_audio", "rec_indicator", "gpu_record", "convert_audio", "spout",
     "hdr", "open_menu_on_start", "hotkeys_enabled", "keep_speed_when_hidden",
     "lens", "lens_bend", "fg_ui_protect", "dim_on_rebuild", "window_follow", "nr_on",
@@ -1304,6 +1305,7 @@ def _menu_layout_payload(cfg: dict, params: dict, monitor: int, lang: str,
         "gpu_no_nr": _index_list(cfg.get("gpu_no_nr")),
         "frame_generation": bool(cfg.get("frame_generation", False)),
         "frame_multiplier": min(FG_MULTIPLIER_MAX, max(2, int(cfg.get("frame_multiplier", 2)))),
+        "dlaa": bool(cfg.get("dlaa", False)),
         "frame_limit_mode": (str(cfg.get("frame_limit_mode", "unlimited"))
                              if str(cfg.get("frame_limit_mode", "unlimited"))
                              in FRAME_LIMIT_MODES else "unlimited"),
@@ -1420,6 +1422,47 @@ def refresh_gpu_ok(st) -> None:
                 "gpu_nr_fail",
                 "This GPU cannot run the neural pass - the picture stays "
                 "unprocessed"), 8.0)
+
+
+def dlaa_verdict(lines):
+    """True / False / None from the worker's DLAA lines, NEWEST FIRST.
+
+    The worker prefixes every refusal with "[dlaa] off:" (a missing
+    nvngx_dlss.dll, an Init_Ext or CreateFeature refusal, a fault, HDR) and
+    says "[dlaa] enabled at" once the feature runs. Only lines newer than the
+    last "[dlaa] UI:" marker count, as for FG: a refusal already answered must
+    not flip the switch again.
+    """
+    for line in lines:
+        if "[dlaa] UI:" in line:
+            return None
+        if "[dlaa] enabled at" in line:
+            return True
+        if "[dlaa] off:" in line:
+            return False
+    return None
+
+
+def refresh_dlaa_ok(st) -> None:
+    """The DLAA switch reflects reality, the way the FG switch does (#76).
+
+    DLAA needs NVIDIA's nvngx_dlss.dll, which is not bundled; without it, or
+    when the runtime refuses, the switch goes back off with an alert naming
+    the usual reason. Once per attempt: switching it on again re-arms it.
+    """
+    if not bool(st.cfg.get("dlaa", False)):
+        return
+    if getattr(st, "dlaa_alerted", False):
+        return
+    if dlaa_verdict(reversed(st.worker_logs[-200:])) is not False:
+        return
+    st.dlaa_alerted = True
+    st.cfg["dlaa"] = False
+    save_menu_layout(st)
+    st.display.alert(UI_STRINGS[st.lang].get(
+        "dlaa_fail",
+        "DLAA could not start - put nvngx_dlss.dll into native\\libraries\\ "
+        "(SDR only)"), 8.0)
 
 
 # FG's own refusal lines, the same shape as NR's: the worker says what the
@@ -1814,6 +1857,7 @@ def menu_payload(st) -> dict:
         "motion_backend": st.cfg.get("motion_backend", "nvofa"),
         "frame_generation": bool(st.cfg.get("frame_generation", False)),
         "frame_multiplier": min(FG_MULTIPLIER_MAX, max(2, int(st.cfg.get("frame_multiplier", 2)))),
+        "dlaa": bool(st.cfg.get("dlaa", False)),
         # The step the presenter is REALLY running, when the runtime refused
         # the requested one and the worker stepped down (issue #100). None
         # until the worker says so; the panel marks the difference so the

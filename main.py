@@ -514,6 +514,7 @@ class _Pipeline:
         "gpu_alerted",
         "gpu_switch_pending",
         "fg_alerted",
+        "dlaa_alerted",
         "gray_active",
         "mon_origin",
         "guide_fails",
@@ -1129,6 +1130,9 @@ def main() -> int:
                 # And whether Frame Generation came up at all (issue #76:
                 # the switch used to stay ON after the runtime refused).
                 settings_io.refresh_fg_ok(st)
+                # The same for DLAA: a missing nvngx_dlss.dll or a refusal
+                # puts the switch back off with the reason.
+                settings_io.refresh_dlaa_ok(st)
                 # #137: the OS may demote a window-owning process to Low again
                 # after the opt-out was set - a re-assert here is what keeps
                 # the answer true, and the read-back inside it is what lets a
@@ -1215,7 +1219,9 @@ def main() -> int:
             # the program does not fall over.
             try:
                 check_worker(st.worker, st.worker_logs)
-                plain_bypass = bypass and not st.cfg.get("frame_generation", False)
+                # DLAA reads the motion field as FG does, NR on or off.
+                plain_bypass = (bypass and not st.cfg.get("frame_generation", False)
+                                and not st.cfg.get("dlaa", False))
                 hardware_motion = False
                 if st.gray_active and not plain_bypass:
                     was_failed = motion_status.failed and motion_status.worker is st.worker
@@ -1301,7 +1307,8 @@ def main() -> int:
                            frame_generation=bool(st.cfg.get("frame_generation", False)),
                            frame_multiplier=int(st.cfg.get("frame_multiplier", 2)),
                            prepared=bool(st.gray_active) and not worker_scene,
-                           early_reply=EARLY_REPLY, worker_scene=worker_scene)
+                           early_reply=EARLY_REPLY, worker_scene=worker_scene,
+                           dlaa=bool(st.cfg.get("dlaa", False)))
                 _perf("send", t0)
             except (BrokenPipeError, OSError, EOFError, RuntimeError) as exc:
                 st.consecutive_restarts += 1

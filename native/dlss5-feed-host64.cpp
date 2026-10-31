@@ -1998,6 +1998,10 @@ static constexpr uint32_t FRAME_FLAG_BYPASS = 0x10u;
 // in the header, and resizing it for a single number would break the protocol
 // on both sides.
 static constexpr uint32_t FRAME_FLAG_SPLIT = 0x20u;
+// bits 6-7: DLAA (dlaa.inl). Bit 7 says the client carries the switch, bit 6
+// is its state; an older client sends neither and NS_DLAA decides.
+static constexpr uint32_t FRAME_FLAG_DLAA = 0x40u;
+static constexpr uint32_t FRAME_FLAG_DLAA_SET = 0x80u;
 // bit 13: answer as soon as the frame is on the GPU queue, not once it has
 // been presented. The client's own per-frame work - the HUD, the commands, the
 // next capture request - then runs while the GPU finishes this frame instead
@@ -7012,6 +7016,7 @@ static bool DownloadVideoFrame(VideoState &v, std::vector<BYTE> &packed,
 }
 
 #include "frame_generation.inl"
+#include "dlaa.inl"
 
 // The frame on screen, recorded once more when the recording stops. A still
 // screen sends no frames (skip-static), so without this the video track would
@@ -7256,6 +7261,7 @@ static void ReleaseVideoTextures(VideoState &v)
     NvofaResetLatch();
     if (PhaseEnabled()) { ++g_capture_generation; g_previous_source_qpc = 0; g_frame_stamp = {}; }
     CloseFgResources();
+    CloseDlaaResources();
     // The shader descriptors referenced these resources - after they are
     // released the descriptors must be reissued (see BindScaleDescriptors).
     if (v.mv.tex == g_scale_dst_bound) g_scale_dst_bound = nullptr;
@@ -8153,12 +8159,18 @@ static int RunVideo()
         ++g_frame_serial;
         g_frame_status = 0u;
         ConfigureFgFrame(fh.reserved);
+        ConfigureDlaaFrame(fh.reserved);
         const double t_frame = PhaseNow();
         const bool phase_on = PhaseEnabled();
         if (phase_on) g_frame_stamp = {};
         ProfileRequest profile_request{ v, fh };
         if (phase_on) ++g_ph_requests;
         bool source_fresh = true;
+        // v.color.tex was written this frame (a capture that brought a frame,
+        // or an uploaded one). Only then does DLAA run: a frame the capture did
+        // not renew still holds DLAA's own result, and feeding that back in
+        // would filter the same picture over and over.
+        bool color_written = true;
         bool defer_tail = false;
         UINT64 upload_done = 0, eval_done = 0, present_done = 0;
         // R12: a capture pause longer than a second leaves every history
@@ -8250,6 +8262,7 @@ static int RunVideo()
             // A frame the capture handed over with the picture it had before
             // is not new (#183): the still-picture hold has to see it as the
             // still it is.
+            color_written = got;
             if (phase_on && got && g_capture_visual_changed && g_capture_identical) ++g_ph_identical;
             source_fresh = got && g_capture_visual_changed && !g_capture_identical;
             g_fg_source_fresh = source_fresh;
@@ -8351,6 +8364,12 @@ static int RunVideo()
             PhaseAdd(PH_UPLOAD, t_up);
             if (!up_ok) return 6;
         }
+        // DLAA over the capture, ahead of everything that reads it. Its own
+        // submission; queue order puts it before the neural pass and the
+        // present, so the tail tokens below keep their order.
+        if (color_written &&
+            !RunDlaa(v, frame == 0 || fh.reset != 0 || (stall_pending && source_fresh)))
+            return 9;
         if (!warmup_done)
         {
             // No feature (SAFE PASSTHROUGH): nothing to warm up - the raw
@@ -8538,6 +8557,7 @@ static void CleanupVideoNgx()
     }
     CloseNvofa();
     CloseFgResources();
+    UnloadDlaa();
     // The cascade first, and unconditionally: passes 2..4 are features like
     // any other, and the line below used to say "feature released" while up
     // to three of them were still alive.

@@ -391,6 +391,7 @@ class OverlayMenu:
             "display_fps": None,
             "frame_generation": False,
             "frame_multiplier": 2,
+            "dlaa": False,
             # The step the presenter really runs, when it differs from the
             # pick above (issue #100: a refused 4x steps down to 2x).
             "frame_multiplier_active": None,
@@ -2142,8 +2143,16 @@ class OverlayMenu:
                 if passes_now > 1:
                     net_bits.append(f"{s.get('nr_passes', 'NR passes')} {passes_now}")
             net_bits.append(limit_labels.get(limit_mode, limit_mode))
+            dlaa_on = bool(self.state.get("dlaa"))
+            if dlaa_on:
+                net_bits.insert(0, "DLAA")
             if fold("net", s.get("fold_net", "Network"),
                     " · ".join(b for b in net_bits if b)):
+                # DLAA (native/dlaa.inl): DLSS anti-aliasing of every captured
+                # frame, NR on or off. Here rather than among the tiles: the
+                # main page's height is budgeted, and the fold's summary still
+                # says when it is on.
+                toggle("dlaa", "DLAA", dlaa_on)
                 # FG's interface protection (v2.6.0): the real frame's pixels
                 # where a still HUD sits over a moving picture. Off by default
                 # until it is measured on more games.

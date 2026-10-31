@@ -507,6 +507,12 @@ FRAME_FLAG_WORKER_SCENE = 0x4000
 # flag), and an older worker that reads two bits only falls back below.
 FG_MULTIPLIER_MAX = 6
 FRAME_FLAG_FG_MULT_HIGH = 0x8000
+# DLAA (native/dlaa.inl): DLSS anti-aliasing of the capture before the neural
+# pass. FRAME_FLAG_DLAA_SET says this client carries the switch, FRAME_FLAG_DLAA
+# is its state - the same explicit-UI shape as FG's 0x800/0x100, so a worker
+# without DLAA ignores both and an old client leaves the worker to NS_DLAA.
+FRAME_FLAG_DLAA = 0x40
+FRAME_FLAG_DLAA_SET = 0x80
 
 # MOTS: the motion field arrives at the optical-flow resolution (~320x180) and
 # the worker upscales it to the work resolution on the GPU. The CPU is spared
@@ -699,7 +705,7 @@ def send_frame(worker: subprocess.Popen, index: int, rgba: np.ndarray,
                split: float = 0.0,
                frame_generation: bool | None = None, frame_multiplier: int = 2,
                prepared: bool = False, early_reply: bool = False,
-               worker_scene: bool = False) -> None:
+               worker_scene: bool = False, dlaa: bool | None = None) -> None:
     """Send a frame to the worker.
 
     With shared memory agreed, only the 24-byte header with the
@@ -713,6 +719,8 @@ def send_frame(worker: subprocess.Popen, index: int, rgba: np.ndarray,
     overlay (window, HUD) stays alive while the effect is off.
     split (0..1): the share of the frame on the left the worker leaves
     unprocessed - the before/after wipe. 0 means off.
+    dlaa: DLSS anti-aliasing of the capture before the neural pass (and in
+    bypass); None leaves the worker to NS_DLAA.
     """
     flags = (FRAME_FLAG_WANT_PIXELS if want_pixels else 0) | \
             (FRAME_FLAG_MOTION_SMALL if motion_small else 0) | \
@@ -730,6 +738,8 @@ def send_frame(worker: subprocess.Popen, index: int, rgba: np.ndarray,
         flags |= 0x800 | (0x100 if frame_generation else 0)
         step = min(FG_MULTIPLIER_MAX, max(2, int(frame_multiplier))) - 2
         flags |= (step & 3) << 9 | (FRAME_FLAG_FG_MULT_HIGH if step & 4 else 0)
+    if dlaa is not None:
+        flags |= FRAME_FLAG_DLAA_SET | (FRAME_FLAG_DLAA if dlaa else 0)
     if split > 0.0:
         # The wipe position rides in the high 16 bits of the same flags field:
         # there is no dedicated field in the header, and widening it for a

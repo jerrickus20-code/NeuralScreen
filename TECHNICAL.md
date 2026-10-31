@@ -1080,6 +1080,59 @@ position is stated in the README notice: research use, takedown on request.
 Absent the DLL, the switch refuses politely and nothing breaks; a different
 build drops into `native/libraries/`.
 
+## DLAA (opt-in)
+
+DLSS super resolution at 1:1 - `NVSDK_NGX_Feature_SuperSampling` with
+`PerfQuality_Value_DLAA` - over the captured frame, ahead of the neural pass
+(`native/dlaa.inl`). Its result is copied back into the capture texture, so NR,
+Boost's residual anchor, the bypass present, FG, the wipe and the recording all
+see the anti-aliased frame without a change of their own; the price is that the
+wipe's "before" half is DLAA'd too.
+
+What a capture gives DLSS, and what it does not:
+
+* **Motion** - the same current -> previous field NR is handed, in work-size
+  pixels. When the processing resolution is below the screen's, the field is
+  stretched to the colour's size on the GPU (the motion upscale shader, on a
+  descriptor pair of its own) and DLSS's MV scale converts the units.
+* **Depth** - none: a flat plane, as FG's.
+* **Jitter** - none. The game resolved its frame before the capture saw it, so
+  there are no sub-pixel offsets to accumulate. This is temporal anti-aliasing
+  and stabilisation of what the screen shows - edges, crawl, shimmer - not the
+  super-sampled reconstruction DLAA performs inside an engine.
+* **HDR** - not supported. The HDR presentation composes the native HDR capture
+  rather than the 8-bit frame DLAA works on, so DLAA would change only the SDR
+  proxy under it; the worker refuses and the switch goes back off.
+
+It runs only on a frame the capture actually renewed: a frame the desktop did
+not change still holds DLAA's own output, and feeding that back in would filter
+the same picture over and over. Its history resets with NR's (scene cut,
+capture pause, first frame) and on every (re)create. NR OFF no longer puts the
+pipeline to sleep while DLAA is on, and the motion field keeps being computed
+in bypass, as with FG.
+
+The switch rides on every frame in the header's bits 6-7 (`FRAME_FLAG_DLAA_SET`
+/ `FRAME_FLAG_DLAA`), like FG's; an older client sends neither and `NS_DLAA=1`
+decides. `NS_DLAA_PRESET=J|K|L|M` picks the DLSS model (unset: the runtime's
+own choice for DLAA, K on 310.x). Every refusal is logged as `[dlaa] off: ...`
+- a missing DLL, Init_Ext, CreateFeature, a caught fault, HDR - and the client
+turns the switch back off once per attempt with an alert, the way it does for FG
+(#76). Success is `[dlaa] enabled at WxH`.
+
+The runtime is NVIDIA's public `nvngx_dlss.dll`, loaded and initialised directly
+(`NVSDK_NGX_D3D12_Init_Ext`, as `nvngx_dlssg.dll` is) from `native/libraries/`
+first and `native/` second, both through the same signature gate as the other
+BYO runtimes. **It is not bundled** and not part of the release contract; adding
+it to the archive means adding it to `MANDATORY_FILES` and
+`REQUIRED_RUNTIME_ARTIFACTS` in `build_release_zip.py`, pinning it in the
+manifest and naming it in THIRD-PARTY-NOTICES.md.
+
+**Unmeasured.** The path was written against the NGX 310 headers in
+`native/include/` and type-checked, not run: no frame-time cost, no quality
+comparison and no card is validated yet. `NS_PHASE=1` does not break DLAA out
+as a stage of its own: it shows only in the frame total, and its GPU time sits
+outside the `eval` timestamps.
+
 ## Runtimes and the libraries folder
 
 The NR and FG runtimes ship in the archive. A user-supplied build in

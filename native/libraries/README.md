@@ -9,6 +9,9 @@ in the parent (`native/`) directory. Files are loaded by exact name:
 - `nvngx_dlssnr.dll` - the Neural Rendering runtime. Override also
   possible via the `nr_dll` config key (path) or the `NS_NR_DLL`
   environment variable - those take priority over this folder.
+- `nvngx_dlss.dll` - DLSS super resolution, used for DLAA (menu ->
+  Network -> DLAA). Not bundled: without it the DLAA switch goes back off
+  with "DLAA could not start". `native/` next to the worker is searched too.
 
 Where to get DLLs: DLSS Swapper, or the official NVIDIA/DLSS GitHub
 repository (`lib/Windows_x86_64/rel/`). Match the DLL's architecture
@@ -31,6 +34,10 @@ downloads anything on its own; it stays fully offline.
 - `nvngx_dlssnr.dll` - рантайм нейрорендеринга. Альтернативный
   переопределитель - ключ `nr_dll` в config.json (путь) или переменная
   окружения `NS_NR_DLL` - они имеют приоритет над этой папкой.
+- `nvngx_dlss.dll` - DLSS super resolution, используется для DLAA (меню ->
+  Сеть -> DLAA). В комплект не входит: без него переключатель DLAA
+  выключится обратно с сообщением "DLAA не запустился". Папка `native/`
+  рядом с воркером тоже проверяется.
 
 Где взять: DLSS Swapper или официальный репозиторий NVIDIA/DLSS на
 GitHub (`lib/Windows_x86_64/rel/`). Следите за архитектурными

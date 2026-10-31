@@ -60,7 +60,7 @@ from winapi import window_frame_rect
 #: Always let through: the pipeline diagnostics. NS_PHASE=1 adds the
 #: per-frame profiler lines ([phase]/[pw]) on top of these.
 _LOG_ALWAYS = ("[host]", "[pure]", "[arch]", "[cap]", "[dda]", "[present]",
-               "[spout]", "[wgc]", "[video]", "[hdr]", "[nvofa]", "[fg]", "[stab]", "[lens]", "[badge]",
+               "[spout]", "[wgc]", "[video]", "[hdr]", "[nvofa]", "[fg]", "[dlaa]", "[stab]", "[lens]", "[badge]",
                # Added in 2.0.1. These nine prefixes were emitted by the
                # worker and dropped HERE - not by the worker, which filters
                # nothing. Nine of them, and they are not decoration:
@@ -429,12 +429,13 @@ def require_compatibility(st) -> None:
 def wants_low_cost_off(st) -> bool:
     """Whether NR OFF may put the frame pipeline fully to sleep.
 
-    Frame Generation still needs a stream of bypass frames.  Recording and a
-    pending screenshot are explicit frame consumers too, so they temporarily
+    Frame Generation and DLAA still need a stream of bypass frames.  Recording
+    and a pending screenshot are explicit frame consumers too, so they temporarily
     wake the bypass path even while the NR toggle itself remains off.
     """
     return (bool(st.paused)
             and not bool(st.cfg.get("frame_generation", False))
+            and not bool(st.cfg.get("dlaa", False))
             and st.recorder is None
             and st.pending_shot is None)
 

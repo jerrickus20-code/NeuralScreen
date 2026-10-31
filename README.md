@@ -136,15 +136,15 @@ into a bar at the top that stays over a game. The dot is green while NR runs.
   50-series; adapters beyond it are unconfirmed.
 
 Behind the sliders icon: monitor/GPU, HDR, media folders, file conversion,
-Spout2, the recording indicator, an on-screen frame counter, tray options, key
-assignments, keyboard navigation, **Notifications**, **Process priority**,
-**Scale**, theme and **12** languages. The frame limit is under **Network**.
+Spout2, REC indicator, frame counter, tray, keys, keyboard navigation,
+**Notifications**, **Process priority**, **Scale**, theme, **12** languages.
+**Network**: frame limit and **DLAA** (opt-in, SDR, needs `nvngx_dlss.dll`).
 
 ## Swapping a runtime
 
-Everything ships in the archive. To run your own runtime build (a newer
-DLSS-G, say), drop the DLL into **`native/libraries/`** — it wins over the
-bundled copy; `nr_dll` / `NS_NR_DLL` remain the NR override.
+Everything but DLAA's DLL ships in the archive. Own builds (newer DLSS-G)
+and `nvngx_dlss.dll` (NVIDIA's DLSS SDK) go into **`native/libraries/`**,
+winning over the bundled copy; `nr_dll` / `NS_NR_DLL` remain the NR override.
 
 ## Recording and screenshots
 
