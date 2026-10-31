@@ -6,7 +6,7 @@ so the property cannot be lost silently.
 
 What the code does, and why that is enough:
 
-* the worker's own allocators are a fixed ring - `Host::kFrames` (3) created
+* the worker's own allocators are a fixed ring - `Host::kFrames` (4) created
   once, each reused only after its own `alloc_fence` has passed
   (`BeginCommands` resets the slot's allocator and list, and the retire wait
   comes first). Nothing is created per frame;

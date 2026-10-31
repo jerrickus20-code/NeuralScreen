@@ -2156,7 +2156,7 @@ class OverlayMenu:
                 # FG's interface protection (v2.6.0): the real frame's pixels
                 # where a still HUD sits over a moving picture. Off by default
                 # until it is measured on more games.
-                toggle("fg_ui_protect", s.get("fg_ui_protect", "Protect the interface in FG"),
+                toggle("fg_ui_protect", s.get("fg_ui_protect", "Protect the interface in FG/DLAA"),
                        bool(self.state.get("fg_ui_protect", False)),
                        hint=s.get("fg_ui_protect_hint", ""))
                 # The hint says what the cap counts: source frames, which is

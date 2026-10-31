@@ -10,7 +10,12 @@ NVIDIA's nvngx_dlss.dll - so this guards the wiring around it:
 * NR OFF does not put the pipeline to sleep while DLAA is on (it runs on the
   bypass frames as well), and the motion field keeps flowing;
 * a refusal ("[dlaa] off: ...") turns the switch back off once, with an alert,
-  and the worker's [dlaa] lines reach the log at all.
+  and the worker's [dlaa] lines reach the log at all;
+* the interface protection sends its rectangles for DLAA as for FG, and the
+  worker hands them to DLSS as the current-colour bias mask;
+* the worker keeps what the review asked of it: four allocators for the extra
+  submission, the raw capture put back when DLAA goes off, the NGX Core
+  fallback, Boost's work-size pass, the still-picture hold.
 
 Run:  runtime\\python.exe tests\\test_dlaa_controls.py
 """
@@ -73,7 +78,9 @@ def main() -> int:
     menu.set_state({"dlaa": True})
     paint(menu)
     fold = find(menu, "fold", "net")
-    if fold is not None and "DLAA" not in str(fold.extra.get("summary", "")):
+    if fold is None:
+        failures.append("no Network fold on the main page")
+    elif "DLAA" not in str(fold.extra.get("summary", "")):
         failures.append("the Network fold's summary does not say DLAA is on")
 
     # 2. The frame header: bits 6-7, nothing else, and None leaves them clear.
@@ -99,7 +106,10 @@ def main() -> int:
     #    warmup and the neural pass, torn down with the textures and NGX.
     dlaa = (NATIVE / "dlaa.inl").read_text(encoding="utf-8")
     for needle, why in (('#include "dlaa.inl"', "dlaa.inl is not compiled in"),
-                        ("ConfigureDlaaFrame(fh.reserved);", "the switch is never read"),
+                        ("ConfigureDlaaFrame(v, fh.reserved);", "the switch is never read"),
+                        ("kFrames = 4;", "DLAA's extra submission stalls on a three-allocator ring"),
+                        ("g_dlaa_raw_shown != nullptr ? g_dlaa_raw_shown : v.color.tex",
+                         "the wipe's before half is not the raw capture"),
                         ("CloseDlaaResources();", "a resize keeps the old DLAA textures"),
                         ("UnloadDlaa();", "shutdown leaves the DLSS runtime loaded")):
         if needle not in host:
@@ -108,11 +118,28 @@ def main() -> int:
     if run_at < 0 or not (host.find("if (!warmup_done)", run_at) > run_at
                           and host.find("EvaluateVideo(v, (frame == 0", run_at) > run_at):
         failures.append("DLAA must run before the warmup and the neural pass")
-    for needle in ("NVSDK_NGX_Feature_SuperSampling", "NVSDK_NGX_PerfQuality_Value_DLAA",
-                   "NsGateByoDll(lib_path, \"nvngx_dlss.dll\")", "[dlaa] enabled at",
-                   "[dlaa] off: %s", "[dlaa] UI: %s"):
+    for needle, why in (
+            ("NVSDK_NGX_Feature_SuperSampling", "not DLSS super resolution"),
+            ("NVSDK_NGX_PerfQuality_Value_DLAA", "not the DLAA mode"),
+            ('NsGateByoDll(lib_path, "nvngx_dlss.dll")', "the BYO runtime is not verified"),
+            ("[dlaa] enabled at", "no success line for the client"),
+            ("[dlaa] off: %s", "no refusal line for the client"),
+            ("[dlaa] UI: %s", "no switch marker for the client"),
+            ("NVSDK_NGX_Parameter_DLSS_Input_Bias_Current_Color_Mask",
+             "the interface rectangles do not reach DLSS"),
+            ("UseDlaaCore(", "no NGX Core fallback"),
+            ("&NVSDK_NGX_D3D12_CreateFeature", "the fallback does not create through the core"),
+            ("static void DlaaRestoreRaw(", "switching off leaves DLAA's picture on a still desktop"),
+            ("kDlaaStillEvaluations", "a still picture is evaluated forever"),
+            ("g_residual_pso", "Boost does not compose onto the native frame"),
+            ("g_dlaa.depth.upload->Release();", "the depth staging buffer is kept"),
+            ("static const unsigned preset = [", "the preset is read every frame")):
         if needle not in dlaa:
-            failures.append(f"dlaa.inl lost {needle!r}")
+            failures.append(f"dlaa.inl: {why}")
+    # The off switch puts the capture back before the textures go.
+    configure = dlaa[dlaa.find("static void ConfigureDlaaFrame"):]
+    if not (0 <= configure.find("DlaaRestoreRaw(v);") < configure.find("CloseDlaaResources();")):
+        failures.append("switching off must restore the capture before closing")
 
     # 4. NR OFF with DLAA on keeps the frames (and the motion) coming.
     idle = SimpleNamespace(paused=True, cfg={"dlaa": True}, recorder=None,
@@ -127,6 +154,19 @@ def main() -> int:
         failures.append("the motion field is skipped in bypass while DLAA needs it")
     if '"[dlaa]"' not in (ROOT / "app" / "pipeline.py").read_text(encoding="utf-8"):
         failures.append("the worker's [dlaa] lines are dropped by the parent")
+
+    # 4b. The interface rectangles are sent for DLAA, FG off.
+    sent = []
+    st = SimpleNamespace(cfg={"fg_ui_protect": True, "dlaa": True}, gray_active=True,
+                         worker=SimpleNamespace(pid=7, poll=lambda: None),
+                         shm=SimpleNamespace(read_gray=lambda: np.zeros((180, 320), np.uint8)),
+                         ui_detector=SimpleNamespace(update=lambda gray: [(1, 2, 3, 4)],
+                                                     reset=lambda: None),
+                         ui_rects_sent=None)
+    with patch.object(protocol, "send_ui_rects", lambda worker, rects: sent.append(rects)):
+        commands._update_ui_protection(st)
+    if sent != [[(1, 2, 3, 4)]]:
+        failures.append(f"the interface protection does not serve DLAA: {sent}")
 
     # 5. The verdict and the alert.
     v = settings_io.dlaa_verdict

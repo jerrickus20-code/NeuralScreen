@@ -1085,51 +1085,74 @@ build drops into `native/libraries/`.
 DLSS super resolution at 1:1 - `NVSDK_NGX_Feature_SuperSampling` with
 `PerfQuality_Value_DLAA` - over the captured frame, ahead of the neural pass
 (`native/dlaa.inl`). Its result is copied back into the capture texture, so NR,
-Boost's residual anchor, the bypass present, FG, the wipe and the recording all
-see the anti-aliased frame without a change of their own; the price is that the
-wipe's "before" half is DLAA'd too.
+Boost's residual anchor, the bypass present, FG and the recording all see the
+anti-aliased frame without a change of their own. The capture as it came is
+kept beside it: the wipe's "before" half is taken from that copy, and switching
+DLAA off puts it back at once, also on a desktop that is not changing.
 
 What a capture gives DLSS, and what it does not:
 
 * **Motion** - the same current -> previous field NR is handed, in work-size
-  pixels. When the processing resolution is below the screen's, the field is
-  stretched to the colour's size on the GPU (the motion upscale shader, on a
-  descriptor pair of its own) and DLSS's MV scale converts the units.
+  pixels. Without Boost, when the processing resolution is below the screen's,
+  the field is stretched to the frame's size on the GPU and DLSS's MV scale
+  converts the units.
 * **Depth** - none: a flat plane, as FG's.
 * **Jitter** - none. The game resolved its frame before the capture saw it, so
   there are no sub-pixel offsets to accumulate. This is temporal anti-aliasing
   and stabilisation of what the screen shows - edges, crawl, shimmer - not the
   super-sampled reconstruction DLAA performs inside an engine.
+* **A still interface over a moving picture** - the motion field is coarse and
+  would drag a HUD along with the scene behind it. With **Protect the interface
+  in FG/DLAA** on (Network), the rectangles FG's protection finds are drawn
+  into a mask and handed to DLSS as `DLSS.Input.Bias.Current.Color.Mask`: there
+  it trusts the current frame instead of its history.
 * **HDR** - not supported. The HDR presentation composes the native HDR capture
   rather than the 8-bit frame DLAA works on, so DLAA would change only the SDR
   proxy under it; the worker refuses and the switch goes back off.
 
-It runs only on a frame the capture actually renewed: a frame the desktop did
-not change still holds DLAA's own output, and feeding that back in would filter
-the same picture over and over. Its history resets with NR's (scene cut,
-capture pause, first frame) and on every (re)create. NR OFF no longer puts the
-pipeline to sleep while DLAA is on, and the motion field keeps being computed
-in bypass, as with FG.
+**Boost.** Without Boost DLAA runs at the frame's size. With Boost it runs at
+Boost's work size, on the frame reduced the way NR's input is, and its
+correction is composed onto the native frame with NR's residual pass
+(`native + DLAA(small) - small`): the cost of a work-size DLSS pass instead of a
+full-size one, and the native frame keeps its sharpness. The anti-aliasing is
+correspondingly coarser - the same trade Boost makes for the network; switch
+Boost off for full-resolution DLAA.
+
+**When it runs.** On every frame the capture renewed. A frame the desktop did
+not change keeps DLAA's last result. A picture presented again unchanged (#183)
+is evaluated four times, as NR is, and then shown from DLAA's last result. Its
+history resets with NR's (scene cut, capture pause, first frame) and on every
+(re)create. NR OFF does not put the pipeline to sleep while DLAA is on, and the
+motion field keeps being computed in bypass, as with FG.
+
+DLAA is a submission of its own on every frame. The worker's command allocators
+went from three to four with it: each submission waits for the allocator of the
+one `kFrames` before it, and with three, DLAA's extra one made that the previous
+frame's neural pass.
 
 The switch rides on every frame in the header's bits 6-7 (`FRAME_FLAG_DLAA_SET`
 / `FRAME_FLAG_DLAA`), like FG's; an older client sends neither and `NS_DLAA=1`
 decides. `NS_DLAA_PRESET=J|K|L|M` picks the DLSS model (unset: the runtime's
 own choice for DLAA, K on 310.x). Every refusal is logged as `[dlaa] off: ...`
-- a missing DLL, Init_Ext, CreateFeature, a caught fault, HDR - and the client
-turns the switch back off once per attempt with an alert, the way it does for FG
-(#76). Success is `[dlaa] enabled at WxH`.
+- a missing DLL, a refused create, a caught fault, HDR - and the client turns
+the switch back off once per attempt with an alert, the way it does for FG
+(#76). Success is `[dlaa] enabled at WxH ...`, naming the route.
 
-The runtime is NVIDIA's public `nvngx_dlss.dll`, loaded and initialised directly
-(`NVSDK_NGX_D3D12_Init_Ext`, as `nvngx_dlssg.dll` is) from `native/libraries/`
-first and `native/` second, both through the same signature gate as the other
-BYO runtimes. **It is not bundled** and not part of the release contract; adding
-it to the archive means adding it to `MANDATORY_FILES` and
+**The runtime.** NVIDIA's public `nvngx_dlss.dll`, loaded and initialised
+directly (`NVSDK_NGX_D3D12_Init_Ext`, as `nvngx_dlssg.dll` is) from
+`native/libraries/` first and `native/` second, both through the same signature
+gate as the other BYO runtimes. When that route is missing, refuses to
+initialise or refuses the feature, it is asked of NGX Core instead - the
+driver's own loader, initialised for NR already - and the log says which route
+answered. **It is not bundled** and not part of the release contract; adding it
+to the archive means adding it to `MANDATORY_FILES` and
 `REQUIRED_RUNTIME_ARTIFACTS` in `build_release_zip.py`, pinning it in the
 manifest and naming it in THIRD-PARTY-NOTICES.md.
 
 **Unmeasured.** The path was written against the NGX 310 headers in
 `native/include/` and type-checked, not run: no frame-time cost, no quality
-comparison and no card is validated yet. `NS_PHASE=1` does not break DLAA out
+comparison and no card is validated yet, and whether the direct route or NGX
+Core answers on a given driver is unknown. `NS_PHASE=1` does not break DLAA out
 as a stage of its own: it shows only in the frame total, and its GPU time sits
 outside the `eval` timestamps.
 

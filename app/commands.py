@@ -731,8 +731,12 @@ def _update_ui_protection(st) -> None:
     worker = getattr(st, "worker", None)
     if worker is None or worker.poll() is not None:
         return
+    # One detector for both DLSS passes that drag a still HUD along with the
+    # motion behind it: FG shows the real frame there, DLAA trusts the
+    # current frame there (native/dlaa.inl).
     want = (bool(st.cfg.get("fg_ui_protect", False))
-            and bool(st.cfg.get("frame_generation", False))
+            and (bool(st.cfg.get("frame_generation", False))
+                 or bool(st.cfg.get("dlaa", False)))
             and bool(getattr(st, "gray_active", False)))
     rects = []
     if want:

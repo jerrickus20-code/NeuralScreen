@@ -152,7 +152,11 @@ struct Host
     ID3D12Device              *dev;
     ID3D12CommandQueue        *queue;      // NGX work
     ID3D12GraphicsCommandList *list;
-    static const int           kFrames = 3;
+    // Four: a frame submits upload, DLAA, the neural pass and the present,
+    // and each BeginCommands waits for the allocator of the submission
+    // kFrames earlier - with three, DLAA's extra one made it the previous
+    // frame's neural pass, and the CPU stalled on it.
+    static const int           kFrames = 4;
     ID3D12CommandAllocator    *alloc[kFrames];
     UINT64                     alloc_fence[kFrames];
     int                        frame_slot;
@@ -781,7 +785,7 @@ static unsigned g_ps_allocator_waits;
 static double g_ps_allocator_wait_sum, g_ps_allocator_wait_max;
 static unsigned g_ps_outstanding_max;
 static int g_ps_active = PS_NONE;
-static int g_ps_slot_stage[Host::kFrames] = { PS_NONE, PS_NONE, PS_NONE };
+static int g_ps_slot_stage[Host::kFrames] = { PS_NONE, PS_NONE, PS_NONE, PS_NONE };
 static UINT64 g_ps_slot_fence[Host::kFrames];
 static void CollectProfileGpuTimes();
 
@@ -6869,6 +6873,10 @@ static bool EvaluateVideo(VideoState &v, int reset, UINT64 *submitted = nullptr)
 // needs no shader, and v.output already sits in UNORDERED_ACCESS, so we get by
 // without barriers. It needs two descriptors for the same UAV: one visible to
 // shaders and an ordinary CPU one, hence the two tiny heaps.
+// DLAA's copy of the capture as it came (dlaa.inl), while v.color.tex holds
+// DLAA's result; null otherwise. COPY_DEST at rest. The wipe's "before" half
+// is taken from it, so the comparison stays against the raw capture.
+static ID3D12Resource *g_dlaa_raw_shown = nullptr;
 static ID3D12DescriptorHeap *g_split_heap_gpu;
 static ID3D12DescriptorHeap *g_split_heap_cpu;
 static ID3D12Resource       *g_split_uav_for;   // which resource the UAV was made for
@@ -6915,23 +6923,24 @@ static bool SplitCompose(VideoState &v, UINT split_x)
     if (split_x == 0 || cw == 0 || ch == 0) return true;
     if (split_x > cw) split_x = cw;
     if (!BeginCommands()) return false;
+    ID3D12Resource *before = g_dlaa_raw_shown != nullptr ? g_dlaa_raw_shown : v.color.tex;
+    const D3D12_RESOURCE_STATES before_rest = g_dlaa_raw_shown != nullptr
+        ? D3D12_RESOURCE_STATE_COPY_DEST : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
     D3D12_RESOURCE_BARRIER pre[] = {
-        Transition(v.color.tex, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                   D3D12_RESOURCE_STATE_COPY_SOURCE),
+        Transition(before, before_rest, D3D12_RESOURCE_STATE_COPY_SOURCE),
         Transition(v.output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                    D3D12_RESOURCE_STATE_COPY_DEST),
     };
     h.list->ResourceBarrier(_countof(pre), pre);
     D3D12_TEXTURE_COPY_LOCATION src = {}, dst = {};
-    src.pResource = v.color.tex;
+    src.pResource = before;
     src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX; src.SubresourceIndex = 0;
     dst.pResource = v.output;
     dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX; dst.SubresourceIndex = 0;
     D3D12_BOX box = { 0, 0, 0, split_x, ch, 1 };
     h.list->CopyTextureRegion(&dst, 0, 0, 0, &src, &box);
     D3D12_RESOURCE_BARRIER post[] = {
-        Transition(v.color.tex, D3D12_RESOURCE_STATE_COPY_SOURCE,
-                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+        Transition(before, D3D12_RESOURCE_STATE_COPY_SOURCE, before_rest),
         Transition(v.output, D3D12_RESOURCE_STATE_COPY_DEST,
                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
     };
@@ -8159,7 +8168,7 @@ static int RunVideo()
         ++g_frame_serial;
         g_frame_status = 0u;
         ConfigureFgFrame(fh.reserved);
-        ConfigureDlaaFrame(fh.reserved);
+        ConfigureDlaaFrame(v, fh.reserved);
         const double t_frame = PhaseNow();
         const bool phase_on = PhaseEnabled();
         if (phase_on) g_frame_stamp = {};
@@ -8366,9 +8375,10 @@ static int RunVideo()
         }
         // DLAA over the capture, ahead of everything that reads it. Its own
         // submission; queue order puts it before the neural pass and the
-        // present, so the tail tokens below keep their order.
-        if (color_written &&
-            !RunDlaa(v, frame == 0 || fh.reset != 0 || (stall_pending && source_fresh)))
+        // present, so the tail tokens below keep their order. Every frame:
+        // a frame with nothing new may still need the capture put back.
+        if (!RunDlaa(v, color_written, color_written && !source_fresh,
+                     frame == 0 || fh.reset != 0 || (stall_pending && source_fresh)))
             return 9;
         if (!warmup_done)
         {
