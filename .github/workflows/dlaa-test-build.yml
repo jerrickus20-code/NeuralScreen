@@ -1,0 +1,74 @@
+name: DLAA test build
+
+# A test patch for the dlaa branch: the worker built from this commit and the
+# Python files that changed, to extract over a NeuralScreen v2.6.4 install.
+# Push a tag named dlaa-test-* to build that commit and publish it as a
+# pre-release; "Run workflow" on the Actions tab builds it without publishing
+# (the zip is then a workflow artifact). The patch carries no NVIDIA runtime:
+# NR and FG come from the v2.6.4 install, DLAA's nvngx_dlss.dll from the user.
+on:
+  push:
+    tags:
+      - 'dlaa-test-*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build the worker
+        shell: cmd
+        run: call native\build-host.bat
+
+      - name: Package the patch
+        id: package
+        shell: pwsh
+        run: |
+          $sha = $env:GITHUB_SHA
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "dlaa-test-$($sha.Substring(0, 8))" }
+          $stage = Join-Path $env:RUNNER_TEMP 'patch'
+          New-Item -ItemType Directory -Force -Path "$stage\app", "$stage\native\libraries" | Out-Null
+          Copy-Item -Path 'app\*.py' -Destination "$stage\app"
+          foreach ($file in 'main.py', 'config.default.json', 'README.md', 'README.ru.md', 'TECHNICAL.md', 'TECHNICAL.ru.md') {
+            Copy-Item -LiteralPath $file -Destination $stage
+          }
+          Copy-Item -LiteralPath 'native\libraries\README.md' -Destination "$stage\native\libraries"
+          foreach ($file in 'nvngx.dll', 'nvngx.dll_ns-forwarder.dll', 'nvngx.dll.manifest') {
+            if (Test-Path -LiteralPath "native\$file") { Copy-Item -LiteralPath "native\$file" -Destination "$stage\native" }
+          }
+          if (-not (Test-Path -LiteralPath "$stage\native\nvngx.dll")) { throw 'the worker was not built' }
+          # A new VERSION.txt makes the app drop its compiled Python cache on
+          # the first start (main.py), so the new modules are what runs.
+          @("NeuralScreen 2.6.4-dlaa", "commit: $sha", "tag: $tag") |
+            Set-Content -LiteralPath "$stage\VERSION.txt" -Encoding utf8
+          Copy-Item -LiteralPath 'docs\DLAA-TEST.md' -Destination "$stage\DLAA-TEST.md"
+          $zip = Join-Path $env:GITHUB_WORKSPACE "NeuralScreen-$tag-patch.zip"
+          Compress-Archive -Path "$stage\*" -DestinationPath $zip
+          Get-ChildItem -Recurse $stage | Select-Object -ExpandProperty FullName
+          "zip=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Keep the zip as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dlaa-test-patch
+          path: ${{ steps.package.outputs.zip }}
+
+      - name: Publish the pre-release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.package.outputs.tag }}" "${{ steps.package.outputs.zip }}" `
+            --repo $env:GITHUB_REPOSITORY `
+            --target $env:GITHUB_SHA `
+            --prerelease `
+            --title "DLAA test build (${{ steps.package.outputs.tag }})" `
+            --notes-file 'docs\DLAA-TEST.md'
