@@ -87,9 +87,10 @@ static struct DlaaState {
     NVSDK_NGX_Parameter *params = nullptr;
     NVSDK_NGX_Handle *feature = nullptr;
     // Render-size textures. output: UNORDERED_ACCESS at rest; depth (flat),
-    // mask and small (Boost's input): NON_PIXEL_SHADER_RESOURCE at rest.
+    // mask and work_in (Boost's input - not "small", which rpcndr.h defines as
+    // char): NON_PIXEL_SHADER_RESOURCE at rest.
     VideoTex depth;
-    ID3D12Resource *output = nullptr, *mask = nullptr, *small = nullptr;
+    ID3D12Resource *output = nullptr, *mask = nullptr, *work_in = nullptr;
     // Frame-size textures. raw: the capture as it came, COPY_DEST at rest.
     // full: Boost's composite, UNORDERED_ACCESS at rest. motion: the field
     // stretched to the frame's size when the work size is smaller (without
@@ -181,7 +182,7 @@ static void CloseDlaaResources()
     g_dlaa.color_is_result = false;
     if (g_submission_failed) return;
     if (g_dlaa.feature == nullptr && g_dlaa.output == nullptr && g_dlaa.depth.tex == nullptr &&
-        g_dlaa.raw == nullptr && g_dlaa.mask == nullptr && g_dlaa.small == nullptr &&
+        g_dlaa.raw == nullptr && g_dlaa.mask == nullptr && g_dlaa.work_in == nullptr &&
         g_dlaa.full == nullptr && g_dlaa.motion == nullptr)
         return;
     // A frame recorded with these may still be on the queue: a toggle or a
@@ -191,7 +192,7 @@ static void CloseDlaaResources()
     if (g_dlaa.feature) { g_dlaa.release(g_dlaa.feature); g_dlaa.feature = nullptr; }
     if (g_dlaa.depth.tex) { g_dlaa.depth.tex->Release(); g_dlaa.depth.tex = nullptr; }
     if (g_dlaa.depth.upload) { g_dlaa.depth.upload->Release(); g_dlaa.depth.upload = nullptr; }
-    for (ID3D12Resource **r : { &g_dlaa.output, &g_dlaa.mask, &g_dlaa.small, &g_dlaa.raw,
+    for (ID3D12Resource **r : { &g_dlaa.output, &g_dlaa.mask, &g_dlaa.work_in, &g_dlaa.raw,
                                 &g_dlaa.full, &g_dlaa.motion })
         if (*r) { (*r)->Release(); *r = nullptr; }
     g_dlaa.bound_color = g_dlaa.bound_mv = nullptr;
@@ -354,9 +355,9 @@ static bool BindDlaaDescriptors(VideoState &v)
     if (g_dlaa.boost)
     {
         srv(v.color.tex, DXGI_FORMAT_R8G8B8A8_UNORM, kDlaaScaleSrc);
-        uav(g_dlaa.small, DXGI_FORMAT_R8G8B8A8_UNORM, at(kDlaaScaleDst));
+        uav(g_dlaa.work_in, DXGI_FORMAT_R8G8B8A8_UNORM, at(kDlaaScaleDst));
         srv(v.color.tex, DXGI_FORMAT_R8G8B8A8_UNORM, kDlaaResNative);
-        srv(g_dlaa.small, DXGI_FORMAT_R8G8B8A8_UNORM, kDlaaResIn);
+        srv(g_dlaa.work_in, DXGI_FORMAT_R8G8B8A8_UNORM, kDlaaResIn);
         srv(g_dlaa.output, DXGI_FORMAT_R8G8B8A8_UNORM, kDlaaResOut);
         uav(g_dlaa.full, DXGI_FORMAT_R8G8B8A8_UNORM, at(kDlaaResDst));
     }
@@ -460,11 +461,11 @@ static bool EnsureDlaa(VideoState &v)
     g_dlaa.raw = MakeTex(fw, fh, DXGI_FORMAT_R8G8B8A8_UNORM, false);
     if (boost)
     {
-        g_dlaa.small = MakeTex(w, height, DXGI_FORMAT_R8G8B8A8_UNORM, true);
+        g_dlaa.work_in = MakeTex(w, height, DXGI_FORMAT_R8G8B8A8_UNORM, true);
         g_dlaa.full = MakeTex(fw, fh, DXGI_FORMAT_R8G8B8A8_UNORM, true);
     }
     if (stretch) g_dlaa.motion = MakeTex(fw, fh, DXGI_FORMAT_R16G16_FLOAT, true);
-    if (!g_dlaa.output || !g_dlaa.mask || !g_dlaa.raw || (boost && (!g_dlaa.small || !g_dlaa.full)) ||
+    if (!g_dlaa.output || !g_dlaa.mask || !g_dlaa.raw || (boost && (!g_dlaa.work_in || !g_dlaa.full)) ||
         (stretch && !g_dlaa.motion))
     { DlaaRefuse(v, "the working textures could not be created"); return false; }
     if (!BindDlaaDescriptors(v)) { DlaaRefuse(v, "descriptor heap"); return false; }
@@ -477,8 +478,8 @@ static bool EnsureDlaa(VideoState &v)
     b[n++] = Transition(g_dlaa.output, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     b[n++] = Transition(g_dlaa.mask, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     b[n++] = Transition(g_dlaa.raw, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
-    if (g_dlaa.small)
-        b[n++] = Transition(g_dlaa.small, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    if (g_dlaa.work_in)
+        b[n++] = Transition(g_dlaa.work_in, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     if (g_dlaa.full)
         b[n++] = Transition(g_dlaa.full, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     if (g_dlaa.motion)
@@ -616,7 +617,7 @@ static bool RunDlaa(VideoState &v, bool color_written, bool still, bool reset)
     if (g_dlaa.boost)
     {
         // The frame at the work size, as NR's input is made (area reduction).
-        auto to_uav = Transition(g_dlaa.small, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+        auto to_uav = Transition(g_dlaa.work_in, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                                  D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         h.list->ResourceBarrier(1, &to_uav);
         h.list->SetDescriptorHeaps(1, heaps);
@@ -626,10 +627,10 @@ static bool RunDlaa(VideoState &v, bool color_written, bool still, bool reset)
         h.list->SetComputeRoot32BitConstants(0, 4, sizes, 0);
         h.list->SetComputeRootDescriptorTable(1, DlaaGpuSlot(kDlaaScaleSrc));
         h.list->Dispatch((g_dlaa.w + 7) / 8, (g_dlaa.height + 7) / 8, 1);
-        auto to_srv = Transition(g_dlaa.small, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        auto to_srv = Transition(g_dlaa.work_in, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         h.list->ResourceBarrier(1, &to_srv);
-        input = g_dlaa.small;
+        input = g_dlaa.work_in;
     }
     else if (g_dlaa.motion != nullptr)
     {
