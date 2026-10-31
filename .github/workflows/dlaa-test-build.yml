@@ -5,8 +5,12 @@ name: DLAA test build
 # Push a tag named dlaa-test-*, or push the commit to the branch
 # dlaa-test-build (the tag is then dlaa-test-<run number>), to build it and
 # publish it as a pre-release; "Run workflow" on the Actions tab builds it
-# without publishing (the zip is then a workflow artifact). The patch carries no NVIDIA runtime:
-# NR and FG come from the v2.6.4 install, DLAA's nvngx_dlss.dll from the user.
+# without publishing (the zips are then workflow artifacts).
+#
+# Two zips. The patch goes over a v2.6.4 folder and carries no NVIDIA runtime.
+# The full install is the published v2.6.4 archive with the patch laid over it
+# and NVIDIA's DLSS runtime (nvngx_dlss.dll, the DLSS SDK's redistributable,
+# signature checked, with its license) added, so it runs as it is unpacked.
 on:
   push:
     tags:
@@ -77,11 +81,54 @@ jobs:
           "zip=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Keep the zip as an artifact
+      - name: Package the full install
+        id: full
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.package.outputs.tag }}"
+          $base = Join-Path $env:RUNNER_TEMP 'neuralscreen-v2.6.4-full.zip'
+          gh release download v2.6.4 --repo perseval-BLR/NeuralScreen `
+            --pattern 'neuralscreen-v2.6.4-full.zip' --output $base
+          $full = Join-Path $env:RUNNER_TEMP 'full'
+          Expand-Archive -LiteralPath $base -DestinationPath $full
+          foreach ($need in 'NeuralScreen.exe', 'runtime\python.exe', 'native\nvngx_dlssnr.dll', 'native\nvngx_dlssg.dll') {
+            if (-not (Test-Path -LiteralPath (Join-Path $full $need))) { throw "the v2.6.4 archive has no $need" }
+          }
+          Copy-Item -Path (Join-Path $env:RUNNER_TEMP 'patch\*') -Destination $full -Recurse -Force
+          # DLAA's runtime, next to the worker (native\libraries\ stays the
+          # user's override). Refused unless NVIDIA signed it.
+          $dlss = Join-Path $full 'native\nvngx_dlss.dll'
+          Invoke-WebRequest -Uri 'https://github.com/NVIDIA/DLSS/raw/main/lib/Windows_x86_64/rel/nvngx_dlss.dll' -OutFile $dlss
+          $sig = Get-AuthenticodeSignature -LiteralPath $dlss
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'NVIDIA') {
+            throw "nvngx_dlss.dll is not NVIDIA-signed: $($sig.Status) $($sig.SignerCertificate.Subject)"
+          }
+          Write-Host "nvngx_dlss.dll $((Get-Item $dlss).VersionInfo.FileVersion), $((Get-Item $dlss).Length) bytes"
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/NVIDIA/DLSS/main/LICENSE.txt' `
+            -OutFile (Join-Path $full 'native\NVIDIA-DLSS-LICENSE.txt')
+          # The archive's own checksum list, for the files it now holds (the
+          # format build_release_zip.py writes: "<sha256> *<path>").
+          $sums = Get-ChildItem -LiteralPath $full -Recurse -File | Where-Object Name -ne 'SHA256SUMS' | ForEach-Object {
+            $rel = $_.FullName.Substring($full.Length + 1).Replace('\', '/')
+            [pscustomobject]@{ Path = $rel; Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+          } | Sort-Object { $_.Path } -CaseSensitive | ForEach-Object { "$($_.Hash) *$($_.Path)" }
+          [IO.File]::WriteAllText((Join-Path $full 'SHA256SUMS'), (($sums -join "`n") + "`n"))
+          $zip = Join-Path $env:GITHUB_WORKSPACE "NeuralScreen-$tag-full.zip"
+          Push-Location $full
+          7z a -tzip -mx=5 $zip * | Out-Null
+          Pop-Location
+          Write-Host "full install: $((Get-Item $zip).Length) bytes"
+          "zip=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Keep the zips as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dlaa-test-patch
-          path: ${{ steps.package.outputs.zip }}
+          name: dlaa-test-build
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.full.outputs.zip }}
 
       - name: Publish the pre-release
         if: github.ref_type == 'tag' || github.ref_name == 'dlaa-test-build'
@@ -89,7 +136,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.package.outputs.tag }}" "${{ steps.package.outputs.zip }}" `
+          gh release create "${{ steps.package.outputs.tag }}" "${{ steps.full.outputs.zip }}" "${{ steps.package.outputs.zip }}" `
             --repo $env:GITHUB_REPOSITORY `
             --target $env:GITHUB_SHA `
             --prerelease `
