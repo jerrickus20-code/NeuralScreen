@@ -27,7 +27,25 @@ jobs:
 
       - name: Build the worker
         shell: cmd
-        run: call native\build-host.bat
+        run: |
+          call native\build-host.bat > build.log 2>&1
+          set BUILD_EXIT=%ERRORLEVEL%
+          type build.log
+          exit /b %BUILD_EXIT%
+
+      - name: Show build errors
+        if: failure()
+        shell: pwsh
+        run: |
+          # Job logs need a GitHub sign-in to read; annotations do not. The
+          # compiler's error lines go into a few annotations, several per one.
+          if (-not (Test-Path -LiteralPath 'build.log')) { Write-Host '::error::build.log was not written'; exit 0 }
+          $lines = @(Get-Content -LiteralPath 'build.log' | Select-String -Pattern 'error|fatal|cannot|not found' | Select-Object -First 40 | ForEach-Object { "$_" })
+          if (-not $lines) { $lines = @(Get-Content -LiteralPath 'build.log' | Select-Object -Last 20) }
+          for ($i = 0; $i -lt $lines.Count; $i += 8) {
+            $chunk = ($lines[$i..([Math]::Min($i + 7, $lines.Count - 1))] -join "`n")
+            Write-Host ('::error::' + $chunk.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A'))
+          }
 
       - name: Package the patch
         id: package
