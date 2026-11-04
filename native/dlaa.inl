@@ -125,6 +125,8 @@ static struct DlaaState {
     // list runs, not when it is recorded (see BindScale4Descriptors).
     ID3D12DescriptorHeap *heap = nullptr, *cpu_heap = nullptr;
     ID3D12Resource *bound_color = nullptr, *bound_mv = nullptr, *bound_cost = nullptr;
+    unsigned bound_cost_generation = 0;   // g_nvofa.generation the cost SRV was written for
+    bool mask_had_cost = false;           // the last mask drawn carried cost blocks
     ID3D12PipelineState *cost_pso = nullptr;   // kDlaaCostMaskHlsl, on g_scale_rs
     int cost_pso_state = 0;                    // 0 not tried, 1 ready, -1 failed
     UINT w = 0, height = 0;   // the render size (DLSS's input and output)
@@ -133,6 +135,7 @@ static struct DlaaState {
     unsigned preset = 0;      // the model the feature was created with
     bool boost = false;
     // The interface rectangles the mask was last drawn from (count 0: none).
+    // UiRectsFor(UI_RECTS_FOR_DLAA) decides whether they are DLAA's at all.
     uint32_t mask_count = UINT32_MAX;
     uint16_t mask_rects[kUiRectsMax][4] = {};
     // The feature has accumulated a frame: false after every (re)create, so
@@ -141,8 +144,10 @@ static struct DlaaState {
     unsigned still_evals = 0;
     // v.color.tex holds DLAA's result rather than the capture (raw has that).
     bool color_is_result = false;
-    // output holds DLAA's result for the capture on screen (the feed mode).
-    bool fed_valid = false;
+    // output holds DLAA's result for the capture on screen (the feed mode);
+    // full and raw hold its composite and the capture itself (the other mode).
+    // Either mode's hold path may only show what was written for this picture.
+    bool fed_valid = false, full_valid = false;
     // The runtime refused or faulted: off until the switch is turned on again.
     bool failed = false;
 } g_dlaa;
@@ -325,6 +330,9 @@ static void CloseDlaaResources()
                                 &g_dlaa.full, &g_dlaa.motion })
         if (*r) { (*r)->Release(); *r = nullptr; }
     g_dlaa.bound_color = g_dlaa.bound_mv = g_dlaa.bound_cost = nullptr;
+    g_dlaa.bound_cost_generation = 0;
+    g_dlaa.mask_had_cost = false;
+    g_dlaa.fed_valid = g_dlaa.full_valid = false;
     g_dlaa.w = g_dlaa.height = g_dlaa.fw = g_dlaa.fh = g_dlaa.mw = g_dlaa.mh = 0;
     g_dlaa.mask_count = UINT32_MAX;
     g_dlaa.history = false;
@@ -721,12 +729,15 @@ static bool EnsureDlaa(VideoState &v)
 // mask is rebuilt on every evaluation, since the cost is.
 static bool DrawDlaaMask()
 {
-    const uint32_t count = (std::min)(g_ui_rects.count, kUiRectsMax);
+    const uint32_t count = UiRectsFor(UI_RECTS_FOR_DLAA) ? (std::min)(g_ui_rects.count, kUiRectsMax) : 0u;
     auto &f = g_nvofa;
     const bool cost = g_dlaa_cost_wanted && f.cost != nullptr && f.valid && EnsureDlaaCostPipeline();
+    // Redrawn when the rectangles change, on every evaluation while the cost
+    // pass is on, and once more when it goes off (its blocks go with it).
     const bool rects_changed = count != g_dlaa.mask_count ||
         memcmp(g_dlaa.mask_rects, g_ui_rects.rects, sizeof(g_dlaa.mask_rects[0]) * count) != 0;
-    if (!cost && !rects_changed) return count > 0;
+    if (!cost && !rects_changed && !g_dlaa.mask_had_cost) return count > 0;
+    g_dlaa.mask_had_cost = cost;
     g_dlaa.mask_count = count;
     memcpy(g_dlaa.mask_rects, g_ui_rects.rects, sizeof(g_dlaa.mask_rects[0]) * count);
     if (!cost && count == 0) return false;   // no mask is handed to DLSS then
@@ -764,11 +775,13 @@ static bool DrawDlaaMask()
     }
     if (cost)
     {
-        if (f.cost.get() != g_dlaa.bound_cost)
+        if (f.cost.get() != g_dlaa.bound_cost || f.generation != g_dlaa.bound_cost_generation)
         {
             // NVOFA's buffer is new (its session was rebuilt): its descriptor
-            // is reissued. The buffer changes only with a rebuild, which waits
-            // for every submission, so no list in flight reads the old one.
+            // is reissued. Told by the session count as well as the address -
+            // a rebuilt buffer of the same size lands at the freed address
+            // readily. A rebuild waits for every submission, so no list in
+            // flight reads the old one.
             D3D12_SHADER_RESOURCE_VIEW_DESC sd = {};
             sd.Format = DXGI_FORMAT_R8_UINT;
             sd.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -779,6 +792,7 @@ static bool DrawDlaaMask()
                      h.dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
             h.dev->CreateShaderResourceView(f.cost.get(), &sd, c);
             g_dlaa.bound_cost = f.cost.get();
+            g_dlaa.bound_cost_generation = f.generation;
         }
         const auto desc = f.cost->GetDesc();
         auto cost_in = Transition(f.cost.get(), D3D12_RESOURCE_STATE_COMMON,
@@ -838,7 +852,7 @@ static void DlaaFeedNr()
 // end on; a refusal turns DLAA off and the frame goes on.
 static bool RunDlaa(VideoState &v, bool color_written, bool still, bool reset, bool nr_consumes)
 {
-    if (color_written) { g_dlaa.color_is_result = false; g_dlaa.fed_valid = false; }
+    if (color_written) { g_dlaa.color_is_result = false; g_dlaa.fed_valid = g_dlaa.full_valid = false; }
     g_dlaa_raw_shown = nullptr;
     g_dlaa_feeds_nr = false;
     if (!DlaaRequested() || !v.color_in_srv || !v.inputs_ready) return true;
@@ -863,12 +877,21 @@ static bool RunDlaa(VideoState &v, bool color_written, bool still, bool reset, b
     }
     if (!EnsureDlaa(v)) return !g_submission_failed;
     const bool feeding = nr_consumes && g_dlaa.boost;
+    // Into the feed mode while v.color.tex holds the full composite (the
+    // neural pass came on over a still desktop): the capture goes back first,
+    // or DLAA would run on its own result and the network's composite would
+    // add the correction a second time.
+    if (feeding && g_dlaa.color_is_result) DlaaRestoreRaw(v);
     const bool fresh_history = reset || !g_dlaa.history;
     if (!(color_written && still)) g_dlaa.still_evals = 0;
     ID3D12Resource *result = g_dlaa.boost ? g_dlaa.full : g_dlaa.output;
-    // A picture DLSS has settled on: shown from the last result, no evaluation.
+    // A picture DLSS has settled on: shown from the last result, no
+    // evaluation - only from a result this mode wrote for this picture. After
+    // a mode switch (the neural pass toggled over a still picture) the other
+    // mode's textures hold nothing for it, and the frame is evaluated instead.
     const bool hold = color_written && still && !fresh_history &&
-                      g_dlaa.still_evals >= kDlaaStillEvaluations;
+                      g_dlaa.still_evals >= kDlaaStillEvaluations &&
+                      (feeding ? g_dlaa.fed_valid : g_dlaa.full_valid);
     if (hold && feeding)
     {
         // output still holds the result; the network takes it. No commands.
@@ -1010,10 +1033,18 @@ static bool RunDlaa(VideoState &v, bool color_written, bool still, bool reset, b
     }
     const UINT64 fence = EndCommands();
     if (fence == 0) return false;
-    if (timed) g_dlaa_time.fence[slot] = fence;
+    if (timed)
+    {
+        // The slot's previous sample, if it completed only during this
+        // frame's allocator wait, is read before its fence is overwritten.
+        DlaaCollectTiming();
+        g_dlaa_time.fence[slot] = fence;
+    }
     g_dlaa.history = true;
-    if (feeding) { g_dlaa.fed_valid = true; DlaaFeedNr(); }
-    else { g_dlaa.color_is_result = true; g_dlaa_raw_shown = g_dlaa.raw; }
+    // DLSS wrote output in both modes; full and raw only in the composing one.
+    g_dlaa.fed_valid = true;
+    if (feeding) DlaaFeedNr();
+    else { g_dlaa.full_valid = true; g_dlaa.color_is_result = true; g_dlaa_raw_shown = g_dlaa.raw; }
     if (color_written && still) ++g_dlaa.still_evals;
     return true;
 }

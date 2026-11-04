@@ -864,13 +864,25 @@ def send_dlaa_model(worker: subprocess.Popen, model: str, strength: float = 1.0,
     worker.stdin.flush()
 
 
-def send_ui_rects(worker: subprocess.Popen, rects, pts: int = 0) -> None:
-    """UIRC: where FG shows the real frame's pixels; an empty list - nowhere."""
+# UIRC's first reserved word names the passes the rectangles are for: FG
+# shows the real frame there, DLAA trusts the current frame there. 0 (an
+# older client) means both, as it did before DLAA had a switch of its own.
+UI_RECTS_FOR_FG = 0x1
+UI_RECTS_FOR_DLAA = 0x2
+
+
+def send_ui_rects(worker: subprocess.Popen, rects, pts: int = 0,
+                  consumers: int = UI_RECTS_FOR_FG | UI_RECTS_FOR_DLAA) -> None:
+    """UIRC: where a still interface sits; an empty list - nowhere.
+
+    consumers: UI_RECTS_FOR_FG and/or UI_RECTS_FOR_DLAA - each pass applies
+    the rectangles only when its own switch asked for them.
+    """
     rects = list(rects)[:UI_RECTS_MAX]
     flat = [int(v) & 0xFFFF for r in rects for v in r]
     flat += [0] * (UI_RECTS_MAX * 4 - len(flat))
-    worker.stdin.write(struct.pack(UI_RECTS_FMT, UI_RECTS_MAGIC, len(rects), 0, 0,
-                                   int(pts), *flat))
+    worker.stdin.write(struct.pack(UI_RECTS_FMT, UI_RECTS_MAGIC, len(rects),
+                                   int(consumers) & 0x3, 0, int(pts), *flat))
     worker.stdin.flush()
 
 

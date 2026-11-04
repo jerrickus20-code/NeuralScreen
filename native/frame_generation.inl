@@ -866,7 +866,7 @@ static bool FgPresent(VideoState &v, ID3D12Resource *color, D3D12_RESOURCE_STATE
     // show the real frame's pixels. DLSS-G warps text with the motion around
     // it, and a still label has no motion of its own to follow. Copied before
     // the lens and the badge, so both go on the protected frame as on any.
-    if (g_ui_rects.count > 0)
+    if (UiRectsFor(UI_RECTS_FOR_FG))
     {
         const auto desc = slot->real->GetDesc();
         const UINT fw = static_cast<UINT>(desc.Width), fh = desc.Height;

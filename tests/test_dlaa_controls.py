@@ -132,6 +132,10 @@ def main() -> int:
             ("UseDlaaCore(", "no NGX Core fallback"),
             ("&NVSDK_NGX_D3D12_CreateFeature", "the fallback does not create through the core"),
             ("static void DlaaRestoreRaw(", "switching off leaves DLAA's picture on a still desktop"),
+            ("(feeding ? g_dlaa.fed_valid : g_dlaa.full_valid)", "the hold may show textures the other mode never wrote"),
+            ("if (feeding && g_dlaa.color_is_result) DlaaRestoreRaw(v);", "DLAA would run on its own composite when NR comes on"),
+            ("f.generation != g_dlaa.bound_cost_generation", "a rebuilt NVOFA cost buffer at the old address keeps a stale descriptor"),
+            ("kDlaaResRaw = 7, kDlaaResDst = 8", "the Boost composite's table does not match the four-input shader"),
             ("kDlaaStillEvaluations", "a still picture is evaluated forever"),
             ("g_residual_pso", "Boost does not compose onto the native frame"),
             ("g_dlaa.depth.upload->Release();", "the depth staging buffer is kept"),
@@ -165,10 +169,26 @@ def main() -> int:
                          ui_detector=SimpleNamespace(update=lambda gray: [(1, 2, 3, 4)],
                                                      reset=lambda: None),
                          ui_rects_sent=None)
-    with patch.object(protocol, "send_ui_rects", lambda worker, rects: sent.append(rects)):
+    with patch.object(protocol, "send_ui_rects",
+                      lambda worker, rects, consumers=3: sent.append((rects, consumers))):
         commands._update_ui_protection(st)
-    if sent != [[(1, 2, 3, 4)]]:
-        failures.append(f"the interface protection does not serve DLAA: {sent}")
+    if sent != [([(1, 2, 3, 4)], protocol.UI_RECTS_FOR_DLAA)]:
+        failures.append(f"the interface protection does not serve DLAA alone: {sent}")
+    # Both switches on, both passes on: the rectangles name both.
+    st.cfg.update({"frame_generation": True, "dlaa_ui_protect": True})
+    st.ui_rects_sent = None
+    sent.clear()
+    with patch.object(protocol, "send_ui_rects",
+                      lambda worker, rects, consumers=3: sent.append((rects, consumers))):
+        commands._update_ui_protection(st)
+    if sent != [([(1, 2, 3, 4)], protocol.UI_RECTS_FOR_FG | protocol.UI_RECTS_FOR_DLAA)]:
+        failures.append(f"with both switches on the rectangles must name both passes: {sent}")
+    worker = SimpleNamespace(stdin=io.BytesIO())
+    protocol.send_ui_rects(worker, [(1, 2, 3, 4)], consumers=protocol.UI_RECTS_FOR_DLAA)
+    if struct.unpack(protocol.UI_RECTS_FMT, worker.stdin.getvalue())[2] != protocol.UI_RECTS_FOR_DLAA:
+        failures.append("UIRC does not carry the passes in its first reserved word")
+    if "UiRectsFor(UI_RECTS_FOR_FG)" not in (NATIVE / "frame_generation.inl").read_text(encoding="utf-8"):
+        failures.append("FG applies the rectangles whether or not its own switch asked")
 
     # 5. The verdict and the alert.
     v = settings_io.dlaa_verdict
@@ -336,7 +356,8 @@ def main() -> int:
                          ui_detector=SimpleNamespace(update=lambda gray: [(1, 2, 3, 4)],
                                                      reset=lambda: None),
                          ui_rects_sent=None)
-    with patch.object(protocol, "send_ui_rects", lambda worker, rects: sent.append(rects)):
+    with patch.object(protocol, "send_ui_rects",
+                      lambda worker, rects, consumers=3: sent.append(rects)):
         commands._update_ui_protection(st)
     if sent != [[(1, 2, 3, 4)]]:
         failures.append(f"DLAA's own protection switch is not on by default: {sent}")

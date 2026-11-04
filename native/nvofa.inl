@@ -42,6 +42,10 @@ static struct NvofaState {
     UINT width = 0, height = 0, grid = 4, current = 0;
     bool valid = false, failed = false;
     unsigned sequence = 0;
+    // Counts the sessions created: a consumer that caches a descriptor of
+    // the cost buffer (dlaa.inl) tells a new buffer by this, not by its
+    // address, which the allocator readily hands out again.
+    unsigned generation = 0;
 } g_nvofa;
 
 static void CloseNvofa()
@@ -194,6 +198,7 @@ static bool EnsureNvofa(UINT width, UINT height)
         return NvofaError("incomplete API table", NV_OF_ERR_OF_NOT_AVAILABLE);
     status = f.api.nvCreateOpticalFlowD3D12(h.dev, &f.session);
     if (status != NV_OF_SUCCESS) return NvofaError("create session", status);
+    ++f.generation;
     auto grids = NvofaCaps(NV_OF_CAPS_SUPPORTED_OUTPUT_GRID_SIZES);
     auto minw = NvofaCaps(NV_OF_CAPS_WIDTH_MIN), minh = NvofaCaps(NV_OF_CAPS_HEIGHT_MIN);
     auto maxw = NvofaCaps(NV_OF_CAPS_WIDTH_MAX), maxh = NvofaCaps(NV_OF_CAPS_HEIGHT_MAX);

@@ -2193,6 +2193,14 @@ using VideoLensAck = VideoPerPassAck;   // magic LNAK, ok, two reserved, pts
 // 1/65535ths of the frame: x, y, w, h. Frame Generation shows the real frame
 // there instead of an interpolated one (frame_generation.inl).
 static constexpr uint32_t kUiRectsMax = 32;
+// reserved0: which passes the rectangles are for (bit 0 FG, bit 1 DLAA); 0
+// from an older client means both.
+static constexpr uint32_t UI_RECTS_FOR_FG = 0x1u;
+static constexpr uint32_t UI_RECTS_FOR_DLAA = 0x2u;
+static inline bool UiRectsFor(uint32_t pass)
+{
+    return g_ui_rects.count > 0 && (g_ui_rects.reserved0 == 0 || (g_ui_rects.reserved0 & pass) != 0);
+}
 struct VideoUiRectsCmd
 {
     uint32_t magic, count, reserved0, reserved1;
@@ -7292,8 +7300,10 @@ static int ReadVideoMessage(VideoState &v, VideoFrameHeader &fh, std::vector<BYT
         memcpy(p, &fh, sizeof(fh));
         if (!ReadExact(stdin, p + sizeof(fh), sizeof(cmd) - sizeof(fh))) return 0;
         cmd.count = (std::min)(cmd.count, kUiRectsMax);
-        if (cmd.count != g_ui_rects.count)
-            Log("[fg] interface protection: %u rectangle(s)", cmd.count);
+        if (cmd.count != g_ui_rects.count || cmd.reserved0 != g_ui_rects.reserved0)
+            Log("[fg] interface protection: %u rectangle(s) for %s", cmd.count,
+                cmd.reserved0 == 0 ? "FG and DLAA" : (cmd.reserved0 & UI_RECTS_FOR_FG) == 0 ? "DLAA"
+                : (cmd.reserved0 & UI_RECTS_FOR_DLAA) == 0 ? "FG" : "FG and DLAA");
         g_ui_rects = cmd;
         return 16;
     }

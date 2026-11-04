@@ -762,11 +762,15 @@ def _update_ui_protection(st) -> None:
     # there (off by default, unmeasured), DLAA trusts the current frame there
     # (native/dlaa.inl; on by default - a smeared HUD is DLAA's most visible
     # artefact, and the detector is cheap).
-    want = ((bool(st.cfg.get("fg_ui_protect", False))
-             and bool(st.cfg.get("frame_generation", False)))
-            or (bool(st.cfg.get("dlaa_ui_protect", True))
-                and bool(st.cfg.get("dlaa", False)))) \
-        and bool(getattr(st, "gray_active", False))
+    for_fg = (bool(st.cfg.get("fg_ui_protect", False))
+              and bool(st.cfg.get("frame_generation", False)))
+    for_dlaa = (bool(st.cfg.get("dlaa_ui_protect", True))
+                and bool(st.cfg.get("dlaa", False)))
+    want = (for_fg or for_dlaa) and bool(getattr(st, "gray_active", False))
+    # The rectangles name the passes that asked for them: the worker's FG
+    # must not protect when only DLAA's switch is on, and the other way round.
+    consumers = ((protocol.UI_RECTS_FOR_FG if for_fg else 0)
+                 | (protocol.UI_RECTS_FOR_DLAA if for_dlaa else 0))
     rects = []
     if want:
         if getattr(st, "ui_detector", None) is None:
@@ -776,7 +780,7 @@ def _update_ui_protection(st) -> None:
             rects = st.ui_detector.update(gray)
     elif getattr(st, "ui_detector", None) is not None:
         st.ui_detector.reset()
-    sent = (worker.pid, tuple(rects))
+    sent = (worker.pid, tuple(rects), consumers if rects else 0)
     last = getattr(st, "ui_rects_sent", None)
     if last == sent:
         return
@@ -784,7 +788,7 @@ def _update_ui_protection(st) -> None:
         st.ui_rects_sent = sent   # a new worker starts with nothing protected
         return
     try:
-        protocol.send_ui_rects(worker, rects)
+        protocol.send_ui_rects(worker, rects, consumers=consumers)
         st.ui_rects_sent = sent
     except Exception as exc:
         print(f"[main] the interface rectangles did not reach the worker ({exc})",
