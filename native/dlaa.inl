@@ -73,13 +73,15 @@ static NVSDK_NGX_Result DlaaEvaluateGuarded(ID3D12GraphicsCommandList *list,
 static constexpr unsigned kDlaaStillEvaluations = 4;
 
 // The shader-visible descriptor slots, all written once per (re)create.
+// The residual table is the shader's: four SRVs (native, in, out, raw) then
+// the UAV, in that order (kResidualHlsl, its root signature).
 enum DlaaSlot : UINT {
     kDlaaMotionSrc = 0, kDlaaMotionDst = 1,           // the motion stretch (full size)
     kDlaaScaleSrc = 2, kDlaaScaleDst = 3,             // colour -> work size (Boost)
-    kDlaaResNative = 4, kDlaaResIn = 5, kDlaaResOut = 6, kDlaaResDst = 7, // the residual (Boost)
-    kDlaaMaskUav = 8,                                 // the interface mask's clear
-    kDlaaCostSrc = 9, kDlaaCostMaskUav = 10,          // NVOFA's cost -> the mask
-    kDlaaSlots = 11
+    kDlaaResNative = 4, kDlaaResIn = 5, kDlaaResOut = 6, kDlaaResRaw = 7, kDlaaResDst = 8, // the residual (Boost)
+    kDlaaMaskUav = 9,                                 // the interface mask's clear
+    kDlaaCostSrc = 10, kDlaaCostMaskUav = 11,         // NVOFA's cost -> the mask
+    kDlaaSlots = 12
 };
 
 // The mask's second source: where NVOFA's cost says the motion is a guess.
@@ -570,6 +572,9 @@ static bool BindDlaaDescriptors(VideoState &v)
         srv(v.color.tex, DXGI_FORMAT_R8G8B8A8_UNORM, kDlaaResNative);
         srv(g_dlaa.work_in, DXGI_FORMAT_R8G8B8A8_UNORM, kDlaaResIn);
         srv(g_dlaa.output, DXGI_FORMAT_R8G8B8A8_UNORM, kDlaaResOut);
+        // t3, the plain downscale: the same texture as "in" here, with its
+        // strength 0 - the pass adds DLAA's correction once, at gStrength.
+        srv(g_dlaa.work_in, DXGI_FORMAT_R8G8B8A8_UNORM, kDlaaResRaw);
         uav(g_dlaa.full, DXGI_FORMAT_R8G8B8A8_UNORM, at(kDlaaResDst));
     }
     uav(g_dlaa.mask, DXGI_FORMAT_R8_UNORM, at(kDlaaMaskUav));
