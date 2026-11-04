@@ -389,6 +389,17 @@ CONFIG_SCHEMA_VERSION = 1
 FRAME_LIMIT_MODES = ("30", "60", "custom", "unlimited")
 #: DLAA's DLSS model: the runtime's own choice first, then NVIDIA's presets.
 DLAA_MODELS = ("auto", "J", "K", "L", "M")
+
+
+def dlaa_strength(cfg: dict) -> float:
+    """How much of DLAA's correction the Boost composite adds, 0..1 (default all)."""
+    try:
+        value = float(cfg.get("dlaa_strength", 1.0))
+    except (TypeError, ValueError):
+        return 1.0
+    if value != value:   # NaN
+        return 1.0
+    return min(1.0, max(0.0, value))
 FRAME_LIMIT_CUSTOM_MIN = 15
 FRAME_LIMIT_CUSTOM_MAX = 240
 
@@ -665,6 +676,7 @@ def _validate_config(cfg: dict) -> dict:
     cfg["frame_generation"] = bool(cfg.get("frame_generation", False))
     cfg["dlaa"] = bool(cfg.get("dlaa", False))
     cfg["dlaa_model"] = _choice(cfg, "dlaa_model", DLAA_MODELS)
+    cfg["dlaa_strength"] = dlaa_strength(cfg)
     try:
         cfg["frame_multiplier"] = min(FG_MULTIPLIER_MAX, max(2, int(cfg.get("frame_multiplier", 2))))
     except (ValueError, TypeError, OverflowError):
@@ -993,6 +1005,7 @@ def _validate_config(cfg: dict) -> dict:
 _BOOL_KEYS = (
     "fullscreen", "worker_present", "motion_on_gpu", "capture_in_worker",
     "pixels_in_shm", "nr_small", "nr_direct", "frame_generation", "dlaa",
+    "dlaa_ui_protect", "dlaa_motion_mask",
     "record_audio", "rec_indicator", "gpu_record", "convert_audio", "spout",
     "hdr", "open_menu_on_start", "hotkeys_enabled", "keep_speed_when_hidden",
     "lens", "lens_bend", "fg_ui_protect", "dim_on_rebuild", "window_follow", "nr_on",
@@ -1311,6 +1324,9 @@ def _menu_layout_payload(cfg: dict, params: dict, monitor: int, lang: str,
         "frame_multiplier": min(FG_MULTIPLIER_MAX, max(2, int(cfg.get("frame_multiplier", 2)))),
         "dlaa": bool(cfg.get("dlaa", False)),
         "dlaa_model": _choice(cfg, "dlaa_model", DLAA_MODELS),
+        "dlaa_strength": dlaa_strength(cfg),
+        "dlaa_ui_protect": bool(cfg.get("dlaa_ui_protect", True)),
+        "dlaa_motion_mask": bool(cfg.get("dlaa_motion_mask", False)),
         "frame_limit_mode": (str(cfg.get("frame_limit_mode", "unlimited"))
                              if str(cfg.get("frame_limit_mode", "unlimited"))
                              in FRAME_LIMIT_MODES else "unlimited"),
@@ -1450,7 +1466,10 @@ def dlaa_verdict(lines):
 
 _DLAA_ENABLED = re.compile(
     r"\[dlaa\] enabled at (\d+)x(\d+) \(frame \d+x\d+(, Boost)?[^)]*\), motion \S+, "
-    r"preset (\S), (direct|NGX Core)")
+    r"preset (\S+), (direct|NGX Core)")
+# "[dlaa] cost 6.1 ms avg, 8.2 ms max, 118 frames": the worker's two-second
+# report of the whole DLAA submission's GPU time.
+_DLAA_COST = re.compile(r"\[dlaa\] cost (\d+(?:\.\d+)?) ms avg")
 
 
 def dlaa_state_from_logs(lines, previous=None) -> dict | None:
@@ -1462,15 +1481,30 @@ def dlaa_state_from_logs(lines, previous=None) -> dict | None:
     switch-off. The newest line that says one of those wins; with none in the
     window (a long session pushes them out) the previous state stands.
     """
+    ms = None
     for line in lines:
         if "[dlaa]" not in line:
             continue
+        cost = _DLAA_COST.search(line)
+        if cost:
+            # The newest cost line counts; it belongs to the running state
+            # found further down (older) in the window.
+            if ms is None:
+                ms = float(cost.group(1))
+            continue
         m = _DLAA_ENABLED.search(line)
         if m:
-            return {"state": "running", "size": f"{m.group(1)}×{m.group(2)}",
-                    "boost": bool(m.group(3)),
-                    "model": "" if m.group(4) == "-" else m.group(4),
-                    "core": m.group(5) == "NGX Core"}
+            # The model: "K", "auto=K" (auto, which the 310 runtime resolves
+            # to K) or "auto" (auto on a runtime whose default is not known).
+            preset = m.group(4)
+            model, auto = (preset.split("=", 1)[1], True) if preset.startswith("auto=") \
+                else ("", True) if preset in ("auto", "-") else (preset, False)
+            state = {"state": "running", "size": f"{m.group(1)}×{m.group(2)}",
+                     "boost": bool(m.group(3)), "model": model, "auto": auto,
+                     "core": m.group(5) == "NGX Core"}
+            if ms is not None:
+                state["ms"] = ms
+            return state
         if "[dlaa] off:" in line:
             reason = ("hdr" if "HDR" in line else
                       "missing" if "not found" in line else "refused")
@@ -1907,6 +1941,9 @@ def menu_payload(st) -> dict:
         "frame_multiplier": min(FG_MULTIPLIER_MAX, max(2, int(st.cfg.get("frame_multiplier", 2)))),
         "dlaa": bool(st.cfg.get("dlaa", False)),
         "dlaa_model": _choice(st.cfg, "dlaa_model", DLAA_MODELS),
+        "dlaa_strength": dlaa_strength(st.cfg),
+        "dlaa_ui_protect": bool(st.cfg.get("dlaa_ui_protect", True)),
+        "dlaa_motion_mask": bool(st.cfg.get("dlaa_motion_mask", False)),
         # What DLAA is doing, from the worker's own lines: shown under the
         # switch (refresh_dlaa_ok keeps it current).
         "dlaa_status": dict(getattr(st, "dlaa_state", None) or {}),

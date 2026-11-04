@@ -353,6 +353,10 @@ def status_readings(state: dict, stats: dict, s: dict) -> list[str]:
         out.append(f"{s.get('nr_short', 'NR')} {nr_text}")
     if has_fg and paused:
         out.append(f"{s.get('fg_short', 'FG')} {shown:.0f}")
+    # NR off, DLAA on: the counter is DLAA's rate (main records every
+    # processed frame then), named so it is not read as the network's.
+    if paused and stats.get("dlaa_running") and not has_fg:
+        out.append(f"DLAA {nr_text}")
     return out
 
 
@@ -394,6 +398,9 @@ class OverlayMenu:
             "frame_multiplier": 2,
             "dlaa": False,
             "dlaa_model": "auto",
+            "dlaa_strength": 1.0,
+            "dlaa_ui_protect": True,
+            "dlaa_motion_mask": False,
             "dlaa_status": {},
             # The step the presenter really runs, when it differs from the
             # pick above (issue #100: a refused 4x steps down to 2x).
@@ -2166,10 +2173,27 @@ class OverlayMenu:
                        str(self.state.get("dlaa_model", "auto")),
                        ["auto", "J", "K", "L", "M"], labels=model_labels,
                        hint=s.get("dlaa_model_hint", ""))
+                # Under Boost DLAA runs at the work size and its correction is
+                # blended onto the sharp frame: how much of it is a trade
+                # between smoother edges and a softer picture. Only there -
+                # at full size the result is DLSS's own and the slider would
+                # change nothing (as the resolution slider, measured 12.09).
+                if boost:
+                    strength = float(self.state.get("dlaa_strength", 1.0))
+                    slider("dlaa_strength", 0.0, 1.0, strength,
+                           s.get("dlaa_strength", "DLAA strength (Boost)"),
+                           hint=s.get("dlaa_strength_hint", ""),
+                           value_text=f"{int(round(strength * 100))}%")
+                toggle("dlaa_ui_protect", s.get("dlaa_ui_protect", "Protect the interface in DLAA"),
+                       bool(self.state.get("dlaa_ui_protect", True)),
+                       hint=s.get("dlaa_ui_protect_hint", ""))
+                toggle("dlaa_motion_mask", s.get("dlaa_motion_mask", "Trust the frame where motion is unsure"),
+                       bool(self.state.get("dlaa_motion_mask", False)),
+                       hint=s.get("dlaa_motion_mask_hint", ""))
                 # FG's interface protection (v2.6.0): the real frame's pixels
                 # where a still HUD sits over a moving picture. Off by default
                 # until it is measured on more games.
-                toggle("fg_ui_protect", s.get("fg_ui_protect", "Protect the interface in FG/DLAA"),
+                toggle("fg_ui_protect", s.get("fg_ui_protect", "Protect the interface in FG"),
                        bool(self.state.get("fg_ui_protect", False)),
                        hint=s.get("fg_ui_protect_hint", ""))
                 # The hint says what the cap counts: source frames, which is
@@ -3262,6 +3286,9 @@ class OverlayMenu:
             except Exception:
                 pass
             return [("nr_res", value)]
+        if item.key == "dlaa_strength":
+            self.state["dlaa_strength"] = value
+            return [("dlaa_strength", value)]
         if item.key.startswith("pass_"):
             # The second set's own slider. Held per key, and `pass_style` is a
             # segment rather than a slider so it never reaches here - the two
@@ -4776,9 +4803,17 @@ class OverlayMenu:
         state = status.get("state")
         if on and state == "running":
             key = "dlaa_hint_running_boost" if status.get("boost") else "dlaa_hint_running"
+            # The model that ran: "K", "K (auto)" when Auto resolved to it,
+            # or "auto" alone when the runtime's default is not known.
+            model = status.get("model") or ""
+            auto = s.get("dlaa_auto", "auto")
+            model = (f"{model} ({auto})" if model and status.get("auto")
+                     else model or auto)
             text = s.get(key, "running · {size} · model {model}").format(
-                size=status.get("size", ""),
-                model=status.get("model") or s.get("dlaa_auto", "auto"))
+                size=status.get("size", ""), model=model)
+            ms = status.get("ms")
+            if isinstance(ms, (int, float)):
+                text += f" · {ms:.1f} ms"
             if status.get("core"):
                 text += " · " + s.get("dlaa_hint_driver", "via the NVIDIA driver")
             return text

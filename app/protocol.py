@@ -849,10 +849,18 @@ DLAA_PRESET_MAGIC = 0x50414C44   # 'DLAP'
 DLAA_MODELS = {"auto": 0, "J": 10, "K": 11, "L": 12, "M": 13}
 
 
-def send_dlaa_model(worker: subprocess.Popen, model: str, pts: int = 0) -> None:
-    """DLAP: the DLSS model DLAA uses from its next frame ("auto" - the runtime's)."""
+def send_dlaa_model(worker: subprocess.Popen, model: str, strength: float = 1.0,
+                    motion_mask: bool = False, pts: int = 0) -> None:
+    """DLAP: DLAA's model, its strength under Boost and the confidence mask.
+
+    The header alone: the model in `index` ("auto" - the runtime's), the
+    strength in `reserved` in 1/1000ths (1..1000; 0 would mean "unset" to the
+    worker), the motion-confidence mask as bit 0 of `reset`.
+    """
+    per_mille = max(1, min(1000, int(round(float(strength) * 1000))))
     worker.stdin.write(struct.pack(FRAME_FMT, DLAA_PRESET_MAGIC,
-                                   DLAA_MODELS.get(model, 0), 0, 0, int(pts)))
+                                   DLAA_MODELS.get(model, 0), 1 if motion_mask else 0,
+                                   per_mille, int(pts)))
     worker.stdin.flush()
 
 

@@ -3,8 +3,10 @@
 A test build of NeuralScreen **v2.6.4** with DLSS anti-aliasing (DLAA) of the
 captured picture, before the neural pass.
 
-**Untested on a GPU so far.** The worker was compiled from the `dlaa` branch;
-this is its first run on real hardware.
+Test build 4 ran on an RTX 4060 Laptop: DLAA started, ran with Boost on and
+off and shut down cleanly. This build adds what the review asked for, none of
+it run on a GPU yet: a cost line, a cheaper Boost path with a strength slider,
+two masks against ghosting, and the counter for DLAA with NR off.
 
 ## Install
 
@@ -39,16 +41,26 @@ autostart off first if you turned it on.
 
 - **DLAA tile** - on the main page next to FG, and in the collapsed bar.
 - **Network** block - under the DLAA switch a line says what it is doing:
-  *starting...*, *running - 3840×2160 - model K*, or why it did not start
-  (DLL missing, HDR on, or the runtime refused). Below it, **DLAA model**:
-  Auto, J, K, L, M.
+  *starting...*, *running - 2560×1600 - model K (auto) - 6.1 ms*, or why it
+  did not start (DLL missing, HDR on, or the runtime refused). The
+  milliseconds are DLAA's own GPU time per frame, from the worker's
+  `[dlaa] cost` line every two seconds. Below it, **DLAA model** (Auto, J, K,
+  L, M), with **Boost** on the **DLAA strength** slider, and two switches:
+  **Protect the interface in DLAA** (on) and **Trust the frame where motion
+  is unsure** (off, experimental - less ghosting on moving objects).
 - **Keys** tab - *DLAA on/off* has no key until you give it one.
-- **Protect the interface in FG/DLAA** (Network) keeps a still HUD from
-  smearing over a moving picture.
+- With NR off and DLAA on, the on-screen counter reads *DLAA 55.0*.
 
-Worth trying: DLAA alone with NR off; with NR on; with **Boost** on (DLAA then
-runs at Boost's size, cheaper and coarser); each model; a game with a HUD,
-with and without interface protection; and the frame rate with DLAA off/on.
+Worth trying, about 20 s each on the same moving scene, then send the log:
+Boost on / DLAA off, Boost on / DLAA on, Boost off / DLAA off, Boost off /
+DLAA on - the `[dlaa] cost` lines and the fps lines tell DLAA's price apart
+from NR's. Then each model (the cost line changes with it); the strength
+slider under Boost; a game with a HUD with the interface protection on and
+off; and the motion switch on a scene with fast-moving objects.
+
+What DLAA here can and cannot do: a captured frame has no sub-pixel jitter
+and no depth, so DLAA smooths edges and shimmer over time; it cannot add
+detail the screen never had, as it does inside a game.
 
 HDR is not supported - with HDR compatibility on, DLAA switches itself off.
 

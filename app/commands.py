@@ -720,13 +720,15 @@ def update_dlaa_model(st) -> None:
     model = str(st.cfg.get("dlaa_model", "auto"))
     if model not in settings_io.DLAA_MODELS:
         model = "auto"
-    sent = (worker.pid, model)
+    strength = settings_io.dlaa_strength(st.cfg)
+    motion_mask = bool(st.cfg.get("dlaa_motion_mask", False))
+    sent = (worker.pid, model, strength, motion_mask)
     if getattr(st, "dlaa_model_sent", None) == sent:
         return
     if not any("[dlaa]" in line for line in st.worker_logs[-400:]):
         return
     try:
-        protocol.send_dlaa_model(worker, model)
+        protocol.send_dlaa_model(worker, model, strength, motion_mask)
         st.dlaa_model_sent = sent
     except Exception as exc:
         print(f"[main] the DLAA model did not reach the worker ({exc})", file=sys.stderr)
@@ -756,12 +758,15 @@ def _update_ui_protection(st) -> None:
     if worker is None or worker.poll() is not None:
         return
     # One detector for both DLSS passes that drag a still HUD along with the
-    # motion behind it: FG shows the real frame there, DLAA trusts the
-    # current frame there (native/dlaa.inl).
-    want = (bool(st.cfg.get("fg_ui_protect", False))
-            and (bool(st.cfg.get("frame_generation", False))
-                 or bool(st.cfg.get("dlaa", False)))
-            and bool(getattr(st, "gray_active", False)))
+    # motion behind it, each behind its own switch: FG shows the real frame
+    # there (off by default, unmeasured), DLAA trusts the current frame there
+    # (native/dlaa.inl; on by default - a smeared HUD is DLAA's most visible
+    # artefact, and the detector is cheap).
+    want = ((bool(st.cfg.get("fg_ui_protect", False))
+             and bool(st.cfg.get("frame_generation", False)))
+            or (bool(st.cfg.get("dlaa_ui_protect", True))
+                and bool(st.cfg.get("dlaa", False)))) \
+        and bool(getattr(st, "gray_active", False))
     rects = []
     if want:
         if getattr(st, "ui_detector", None) is None:
@@ -1267,6 +1272,22 @@ def apply_menu_action(st, action: tuple) -> None:
         if st.cfg.get("frame_generation"):
             st.fg_alerted = False
         settings_io.save_menu_layout(st)
+    elif kind == "dlaa_strength":
+        # The slider: how much of DLAA's correction the Boost composite adds.
+        # Reaches the worker with the model (update_dlaa_model).
+        try:
+            value = float(action[1])
+        except (TypeError, ValueError):
+            return
+        st.cfg["dlaa_strength"] = min(1.0, max(0.0, value))
+        settings_io.save_menu_layout(st)
+    elif kind == "toggle" and action[1] in ("dlaa_ui_protect", "dlaa_motion_mask"):
+        key = action[1]
+        default = key == "dlaa_ui_protect"
+        st.cfg[key] = not bool(st.cfg.get(key, default))
+        st.display.menu.set_state({key: st.cfg[key]})
+        settings_io.save_menu_layout(st)
+        print(f"[main] {key}: {'on' if st.cfg[key] else 'off'}")
     elif kind == "dlaa_model":
         # The worker gets it on the next pass of the loop (update_dlaa_model),
         # and rebuilds DLAA with it - also on a desktop that is not changing.

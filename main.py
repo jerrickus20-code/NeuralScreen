@@ -1687,11 +1687,16 @@ def main() -> int:
                 st.display.alert(UI_STRINGS[st.lang]["nr_on"])
             _perf("show", t0)
             completed_at = time.perf_counter()
-            if not bypass:
+            # With NR off, DLAA still processes every frame: its rate is the
+            # counter's then ("DLAA 55" on the HUD, see hud_lines).
+            dlaa_running = bool(st.cfg.get("dlaa", False)) and (st.dlaa_state or {}).get(
+                "state") == "running"
+            if not bypass or dlaa_running:
                 nr_rate.record(completed_at)
             last_fps = nr_rate.rate(completed_at)
             st.display.set_hud({
                 "fps": last_fps,
+                "dlaa_running": dlaa_running,
                 # NR ON but the worker is not evaluating: the picture is raw.
                 # Without this the only symptom is a counter that runs too fast,
                 # and the user has no way to know the pass stopped.

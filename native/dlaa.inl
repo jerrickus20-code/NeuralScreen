@@ -1,35 +1,37 @@
 // DLAA: DLSS super resolution at 1:1 (NVSDK_NGX_Feature_SuperSampling,
 // PerfQuality_Value_DLAA) over the captured frame, before the neural pass.
 //
-// The result is copied back into v.color.tex, so everything downstream of the
-// capture - NR, Boost's residual anchor, the bypass present, FG, the
-// recording - sees the anti-aliased frame and needs no change of its own. The
-// raw frame is kept beside it (g_dlaa.raw): the wipe's "before" half shows it,
-// and switching DLAA off puts it back at once, even on a desktop that does not
-// change.
+// Without Boost the result is copied back into v.color.tex, so everything
+// downstream of the capture - NR, the bypass present, FG, the recording - sees
+// the anti-aliased frame and needs no change of its own. The raw frame is kept
+// beside it (g_dlaa.raw): the wipe's "before" half shows it, and switching
+// DLAA off puts it back at once, even on a desktop that does not change.
+//
+// With Boost DLAA runs at Boost's work size, on the frame scaled down the way
+// NR's input is. When the neural pass runs on the frame, it is handed that
+// work-size result directly (g_dlaa_feeds_nr, EvaluateVideo) and NR's own
+// residual composite adds DLAA's correction (DLAA(small) - small) at DLAA's
+// strength next to the network's: one downscale and one composite per frame
+// instead of two of each. When the neural pass is off, DLAA composes the full
+// frame itself with the same residual pass. Either way the native frame keeps
+// its sharpness and the anti-aliasing is coarser - the trade Boost makes.
 //
 // What a capture can and cannot give DLSS. Motion: the same current ->
 // previous field NR is handed (in work-size pixels). Depth: none - a flat
 // plane, as FG's. Jitter: none - the game already resolved its frame, so DLAA
 // here is temporal anti-aliasing and stabilisation of what the screen shows,
-// not the sub-pixel reconstruction it does inside an engine. Where the client
-// found a still interface over a moving picture (the UIRC rectangles FG's
-// interface protection uses), DLSS is told to trust the current frame
-// (DLSS.Input.Bias.Current.Color.Mask) instead of dragging the HUD along with
-// the motion behind it.
-//
-// Two sizes. Without Boost DLAA runs at the frame's size, as DLAA does. With
-// Boost it runs at Boost's work size, on the frame scaled down the way NR's
-// input is, and its correction is composed onto the native frame with NR's own
-// residual pass (native + DLAA(small) - small): a fraction of the cost, and the
-// native frame keeps its sharpness - coarser anti-aliasing, the same trade
-// Boost makes for the network.
+// not the sub-pixel reconstruction it does inside an engine. Two things tell
+// DLSS to trust the current frame instead of its history (the
+// DLSS.Input.Bias.Current.Color.Mask): the still-interface rectangles the
+// client finds (UIRC, as FG's protection), and, opt-in, the blocks where
+// NVOFA's own cost says its motion is unreliable.
 //
 // The runtime is NVIDIA's public nvngx_dlss.dll: native\libraries\ first
 // (verified like every BYO file), then native\, initialised directly as
 // nvngx_dlssg.dll is. When that route is missing or refused, the feature is
 // asked of NGX Core - the driver's own loader, initialised for NR already.
-// Opt-in, like FG.
+// Opt-in, like FG. Its GPU time is measured on every frame and logged every
+// two seconds ("[dlaa] cost", the line the menu's status reads).
 static PFN_NR_Evaluate g_dlaa_evaluate = nullptr;
 // The exception code of the last DLSS call that faulted inside NVIDIA's
 // runtime, 0 when it did not. Guarded for the same reason as FG's (#145): an
@@ -76,12 +78,32 @@ enum DlaaSlot : UINT {
     kDlaaScaleSrc = 2, kDlaaScaleDst = 3,             // colour -> work size (Boost)
     kDlaaResNative = 4, kDlaaResIn = 5, kDlaaResOut = 6, kDlaaResDst = 7, // the residual (Boost)
     kDlaaMaskUav = 8,                                 // the interface mask's clear
-    kDlaaSlots = 9
+    kDlaaCostSrc = 9, kDlaaCostMaskUav = 10,          // NVOFA's cost -> the mask
+    kDlaaSlots = 11
 };
+
+// The mask's second source: where NVOFA's cost says the motion is a guess.
+// cost (R8_UINT, per flow block, higher = worse match) is read at the block
+// the pixel falls in; the mask pixel is set, never cleared, so the rectangles
+// drawn before stay. The threshold is baked in (NS_DLAA_COST_T, default
+// kDlaaCostThreshold): the scale root signature has four constants, all used.
+static const char kDlaaCostMaskHlsl[] =
+    "Texture2D<uint>    gCost : register(t0);\n"
+    "RWTexture2D<float> gMask : register(u0);\n"
+    "cbuffer S : register(b0) { uint gW; uint gH; uint gCW; uint gCH; };\n"
+    "[numthreads(8, 8, 1)]\n"
+    "void CSMain(uint3 id : SV_DispatchThreadID)\n"
+    "{\n"
+    "    if (id.x >= gW || id.y >= gH) return;\n"
+    "    uint2 c = uint2(id.x * gCW / gW, id.y * gCH / gH);\n"
+    "    if (gCost[c] > DLAA_COST_T) gMask[id.xy] = 1.0;\n"
+    "}\n";
+static constexpr unsigned kDlaaCostThreshold = 32;
 
 static struct DlaaState {
     HMODULE module = nullptr;
     bool via_core = false;
+    unsigned runtime_major = 0;   // nvngx_dlss.dll's file version (0: unknown or NGX Core)
     PFN_NR_Create create = nullptr;
     PFN_NR_Release release = nullptr;
     NVSDK_NGX_Parameter *params = nullptr;
@@ -100,7 +122,9 @@ static struct DlaaState {
     // MOTS and by NR within a frame, and a shader-visible heap is read when the
     // list runs, not when it is recorded (see BindScale4Descriptors).
     ID3D12DescriptorHeap *heap = nullptr, *cpu_heap = nullptr;
-    ID3D12Resource *bound_color = nullptr, *bound_mv = nullptr;
+    ID3D12Resource *bound_color = nullptr, *bound_mv = nullptr, *bound_cost = nullptr;
+    ID3D12PipelineState *cost_pso = nullptr;   // kDlaaCostMaskHlsl, on g_scale_rs
+    int cost_pso_state = 0;                    // 0 not tried, 1 ready, -1 failed
     UINT w = 0, height = 0;   // the render size (DLSS's input and output)
     UINT fw = 0, fh = 0;      // the frame's size
     UINT mw = 0, mh = 0;      // the motion field's size
@@ -115,10 +139,18 @@ static struct DlaaState {
     unsigned still_evals = 0;
     // v.color.tex holds DLAA's result rather than the capture (raw has that).
     bool color_is_result = false;
+    // output holds DLAA's result for the capture on screen (the feed mode).
+    bool fed_valid = false;
     // The runtime refused or faulted: off until the switch is turned on again.
     bool failed = false;
 } g_dlaa;
 static int g_dlaa_ui_enabled = -1;
+
+// The model the menu picked (DLAP): 0 = the runtime's own choice, else the
+// NGX preset value (J..M); -1 until a client sends one. The strength of
+// DLAA's correction under Boost (DLAP too), -1 until sent.
+static int g_dlaa_preset_ui = -1;
+static float g_dlaa_strength_ui = -1.0f;
 
 static bool DlaaRequested()
 {
@@ -128,10 +160,6 @@ static bool DlaaRequested()
     }();
     return (g_dlaa_ui_enabled < 0 ? requested : g_dlaa_ui_enabled != 0) && !g_dlaa.failed;
 }
-
-// The model the menu picked (DLAP): 0 = the runtime's own choice, else the
-// NGX preset value (J..M); -1 until a client sends one.
-static int g_dlaa_preset_ui = -1;
 
 // The DLSS model for DLAA: the menu's choice, else NS_DLAA_PRESET=J|K|L|M
 // (read once), else the runtime's own (K, the transformer model, on 310.x).
@@ -148,6 +176,102 @@ static unsigned DlaaPreset()
     const unsigned ui = static_cast<unsigned>(g_dlaa_preset_ui);
     return (ui >= NVSDK_NGX_DLSS_Hint_Render_Preset_J && ui <= NVSDK_NGX_DLSS_Hint_Render_Preset_M)
         ? ui : 0u;
+}
+
+// How much of DLAA's correction the Boost composite adds (0..1): the menu's
+// slider, else NS_DLAA_STRENGTH (read once), else all of it.
+static float DlaaStrength()
+{
+    static const float from_env = [] {
+        char value[16] = {};
+        if (GetEnvironmentVariableA("NS_DLAA_STRENGTH", value, sizeof(value)) == 0) return 1.0f;
+        const float f = static_cast<float>(atof(value));
+        return f >= 0.0f && f <= 1.0f ? f : 1.0f;
+    }();
+    return g_dlaa_strength_ui >= 0.0f ? g_dlaa_strength_ui : from_env;
+}
+
+// ---- GPU time: two timestamps around every DLAA submission ----------------
+// Always on, unlike the NS_PHASE stages: the number is what the status line
+// shows and what the models are compared by.
+static struct DlaaTiming {
+    ID3D12QueryHeap *heap = nullptr;
+    ID3D12Resource *readback = nullptr;
+    UINT64 freq = 0;
+    UINT64 fence[Host::kFrames] = {};
+    int state = 0;   // 0 not tried, 1 ready, -1 failed
+    double sum = 0.0, max = 0.0;
+    unsigned n = 0;
+    ULONGLONG report_tick = 0;
+} g_dlaa_time;
+
+static bool DlaaTimingReady()
+{
+    auto &t = g_dlaa_time;
+    if (t.state != 0) return t.state == 1;
+    t.state = -1;
+    D3D12_QUERY_HEAP_DESC qd = {};
+    qd.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+    qd.Count = 2 * Host::kFrames;
+    if (FAILED(h.dev->CreateQueryHeap(&qd, IID_PPV_ARGS(&t.heap)))) return false;
+    D3D12_HEAP_PROPERTIES rb = {};
+    rb.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC bd = {};
+    bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    bd.Width = sizeof(UINT64) * 2 * Host::kFrames; bd.Height = 1; bd.DepthOrArraySize = 1;
+    bd.MipLevels = 1; bd.SampleDesc.Count = 1;
+    bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (FAILED(h.dev->CreateCommittedResource(&rb, D3D12_HEAP_FLAG_NONE, &bd,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&t.readback)))) return false;
+    if (FAILED(h.queue->GetTimestampFrequency(&t.freq)) || t.freq == 0) return false;
+    t.state = 1;
+    return true;
+}
+
+// Read the slots whose submissions completed, and say the average every 2 s.
+static void DlaaCollectTiming()
+{
+    auto &t = g_dlaa_time;
+    if (t.state != 1) return;
+    const UINT64 completed = h.fence->GetCompletedValue();
+    if (completed == UINT64_MAX) return;
+    for (int slot = 0; slot < Host::kFrames; ++slot)
+    {
+        if (t.fence[slot] == 0 || t.fence[slot] > completed) continue;
+        t.fence[slot] = 0;
+        D3D12_RANGE r = { sizeof(UINT64) * slot * 2, sizeof(UINT64) * (slot + 1) * 2 };
+        void *mapped = nullptr;
+        if (FAILED(t.readback->Map(0, &r, &mapped)) || mapped == nullptr) continue;
+        const UINT64 *ts = static_cast<const UINT64 *>(mapped) + slot * 2;
+        if (ts[1] > ts[0])
+        {
+            const double ms = static_cast<double>(ts[1] - ts[0]) * 1000.0 / static_cast<double>(t.freq);
+            t.sum += ms;
+            if (ms > t.max) t.max = ms;
+            ++t.n;
+        }
+        D3D12_RANGE none = { 0, 0 };
+        t.readback->Unmap(0, &none);
+    }
+    const ULONGLONG now = GetTickCount64();
+    if (t.report_tick == 0) t.report_tick = now;
+    if (now - t.report_tick >= 2000 && t.n > 0)
+    {
+        // "[dlaa] cost" is a contract: settings_io parses it for the status line.
+        Log("[dlaa] cost %.1f ms avg, %.1f ms max, %u frames (the whole DLAA submission)",
+            t.sum / t.n, t.max, t.n);
+        t.sum = t.max = 0.0; t.n = 0;
+        t.report_tick = now;
+    }
+}
+
+static void CloseDlaaTiming()
+{
+    auto &t = g_dlaa_time;
+    if (t.readback) { t.readback->Release(); t.readback = nullptr; }
+    if (t.heap) { t.heap->Release(); t.heap = nullptr; }
+    t.state = 0;
+    for (auto &f : t.fence) f = 0;
 }
 
 // Put the capture back where DLAA's result was: the switch went off, or DLAA
@@ -179,7 +303,10 @@ static void DlaaRestoreRaw(VideoState &v)
 static void CloseDlaaResources()
 {
     g_dlaa_raw_shown = nullptr;
+    g_dlaa_feeds_nr = false;
+    g_dlaa_feed_out = g_dlaa_feed_raw = nullptr;
     g_dlaa.color_is_result = false;
+    g_dlaa.fed_valid = false;
     if (g_submission_failed) return;
     if (g_dlaa.feature == nullptr && g_dlaa.output == nullptr && g_dlaa.depth.tex == nullptr &&
         g_dlaa.raw == nullptr && g_dlaa.mask == nullptr && g_dlaa.work_in == nullptr &&
@@ -195,7 +322,7 @@ static void CloseDlaaResources()
     for (ID3D12Resource **r : { &g_dlaa.output, &g_dlaa.mask, &g_dlaa.work_in, &g_dlaa.raw,
                                 &g_dlaa.full, &g_dlaa.motion })
         if (*r) { (*r)->Release(); *r = nullptr; }
-    g_dlaa.bound_color = g_dlaa.bound_mv = nullptr;
+    g_dlaa.bound_color = g_dlaa.bound_mv = g_dlaa.bound_cost = nullptr;
     g_dlaa.w = g_dlaa.height = g_dlaa.fw = g_dlaa.fh = g_dlaa.mw = g_dlaa.mh = 0;
     g_dlaa.mask_count = UINT32_MAX;
     g_dlaa.history = false;
@@ -222,12 +349,16 @@ static void UnloadDlaa()
 {
     CloseDlaaResources();
     if (g_submission_failed) return;
+    CloseDlaaTiming();
+    if (g_dlaa.cost_pso) { g_dlaa.cost_pso->Release(); g_dlaa.cost_pso = nullptr; }
+    g_dlaa.cost_pso_state = 0;
     if (g_dlaa.heap) { g_dlaa.heap->Release(); g_dlaa.heap = nullptr; }
     if (g_dlaa.cpu_heap) { g_dlaa.cpu_heap->Release(); g_dlaa.cpu_heap = nullptr; }
     if (g_dlaa.params) { NVSDK_NGX_D3D12_DestroyParameters(g_dlaa.params); g_dlaa.params = nullptr; }
     g_dlaa.create = nullptr; g_dlaa.release = nullptr; g_dlaa_evaluate = nullptr;
     if (g_dlaa.module) { FreeLibrary(g_dlaa.module); g_dlaa.module = nullptr; }
     g_dlaa.via_core = false;
+    g_dlaa.runtime_major = 0;
 }
 
 // The direct runtime goes; NGX Core answers instead. False when the core was
@@ -242,8 +373,26 @@ static bool UseDlaaCore(const char *why)
     g_dlaa.release = reinterpret_cast<PFN_NR_Release>(&NVSDK_NGX_D3D12_ReleaseFeature);
     g_dlaa_evaluate = reinterpret_cast<PFN_NR_Evaluate>(&NVSDK_NGX_D3D12_EvaluateFeature_C);
     g_dlaa.via_core = true;
+    g_dlaa.runtime_major = 0;
     Log("[dlaa] %s - asking NGX Core (the driver's own loader) instead", why);
     return true;
+}
+
+// The DLL's file version, for the log and for naming the model "auto" means.
+static unsigned DlaaRuntimeMajor(const wchar_t *path)
+{
+    DWORD unused = 0;
+    const DWORD n = GetFileVersionInfoSizeW(path, &unused);
+    if (n == 0) return 0;
+    std::vector<BYTE> info(n);
+    VS_FIXEDFILEINFO *fi = nullptr;
+    UINT len = 0;
+    if (!GetFileVersionInfoW(path, 0, n, info.data()) ||
+        !VerQueryValueW(info.data(), L"\\", reinterpret_cast<void **>(&fi), &len) || !fi)
+        return 0;
+    Log("[dlaa] DLSS runtime %u.%u.%u.%u", HIWORD(fi->dwFileVersionMS), LOWORD(fi->dwFileVersionMS),
+        HIWORD(fi->dwFileVersionLS), LOWORD(fi->dwFileVersionLS));
+    return HIWORD(fi->dwFileVersionMS);
 }
 
 static bool LoadDlaaRuntime(VideoState &v)
@@ -263,32 +412,38 @@ static bool LoadDlaaRuntime(VideoState &v)
     if (auto slash = wcsrchr(directory, L'\\')) *(slash + 1) = 0;
     wchar_t lib_path[MAX_PATH]; wcscpy_s(lib_path, directory);
     wcscat_s(lib_path, L"libraries\\nvngx_dlss.dll");
+    const wchar_t *loaded_from = nullptr;
     if (GetFileAttributesW(lib_path) != INVALID_FILE_ATTRIBUTES)
     {
         if (NsGateByoDll(lib_path, "nvngx_dlss.dll"))
         {
             g_dlaa.module = LoadLibraryW(lib_path);
             if (g_dlaa.module)
+            {
+                loaded_from = lib_path;
                 Log("[dlaa] DLSS runtime from native\\libraries\\ (BYO, verified NVIDIA signature)");
+            }
         }
         else
             Log("[dlaa] BYO refused: nvngx_dlss.dll is not a NVIDIA-signed runtime (%ls)", lib_path);
     }
-    if (!g_dlaa.module)
+    wchar_t path[MAX_PATH]; wcscpy_s(path, directory);
+    wcscat_s(path, L"nvngx_dlss.dll");
+    if (!g_dlaa.module && GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES)
     {
-        wchar_t path[MAX_PATH]; wcscpy_s(path, directory);
-        wcscat_s(path, L"nvngx_dlss.dll");
-        if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES)
+        if (NsGateByoDll(path, "nvngx_dlss.dll"))
         {
-            if (NsGateByoDll(path, "nvngx_dlss.dll")) g_dlaa.module = LoadLibraryW(path);
-            else Log("[dlaa] nvngx_dlss.dll next to the worker is not a NVIDIA-signed runtime");
+            g_dlaa.module = LoadLibraryW(path);
+            if (g_dlaa.module) loaded_from = path;
         }
+        else Log("[dlaa] nvngx_dlss.dll next to the worker is not a NVIDIA-signed runtime");
     }
     const char *direct_failure = nullptr;
     if (!g_dlaa.module)
         direct_failure = "nvngx_dlss.dll not found in native\\libraries\\ or native\\";
     else
     {
+        g_dlaa.runtime_major = DlaaRuntimeMajor(loaded_from);
         auto init = reinterpret_cast<PFN_NR_InitExt>(GetProcAddress(g_dlaa.module, "NVSDK_NGX_D3D12_Init_Ext"));
         g_dlaa.create = reinterpret_cast<PFN_NR_Create>(GetProcAddress(g_dlaa.module, "NVSDK_NGX_D3D12_CreateFeature"));
         g_dlaa.release = reinterpret_cast<PFN_NR_Release>(GetProcAddress(g_dlaa.module, "NVSDK_NGX_D3D12_ReleaseFeature"));
@@ -309,10 +464,66 @@ static bool LoadDlaaRuntime(VideoState &v)
         return true;
     }
     g_dlaa.create = nullptr; g_dlaa.release = nullptr; g_dlaa_evaluate = nullptr;
+    g_dlaa.runtime_major = 0;
     if (UseDlaaCore(direct_failure)) return true;
     if (g_dlaa.module) { FreeLibrary(g_dlaa.module); g_dlaa.module = nullptr; }
     DlaaRefuse(v, "%s - put NVIDIA's nvngx_dlss.dll into native\\libraries\\", direct_failure);
     return false;
+}
+
+// What "auto" resolves to, for the log and the status line: the 310 runtimes
+// use K for DLAA (the SDK header says so); anything else is not assumed.
+static const char *DlaaPresetName(unsigned preset)
+{
+    static char text[16];
+    if (preset != 0)
+    {
+        text[0] = static_cast<char>('A' + preset - 1); text[1] = 0;
+        return text;
+    }
+    return g_dlaa.runtime_major >= 310 ? "auto=K" : "auto";
+}
+
+// The cost-mask shader, compiled once; on the scale root signature.
+static bool EnsureDlaaCostPipeline()
+{
+    if (g_dlaa.cost_pso_state != 0) return g_dlaa.cost_pso_state == 1;
+    g_dlaa.cost_pso_state = -1;
+    if (g_scale_rs == nullptr) return false;
+    HMODULE compiler = LoadLibraryExW(L"d3dcompiler_47.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    auto compile = compiler ? reinterpret_cast<PFN_D3DCompile_>(GetProcAddress(compiler, "D3DCompile")) : nullptr;
+    if (compile == nullptr) return false;
+    unsigned threshold = kDlaaCostThreshold;
+    char env[16] = {};
+    if (GetEnvironmentVariableA("NS_DLAA_COST_T", env, sizeof(env)) > 0)
+    {
+        const unsigned t = static_cast<unsigned>(strtoul(env, nullptr, 10));
+        if (t >= 1 && t <= 255) threshold = t;
+    }
+    char define[16];
+    snprintf(define, sizeof(define), "%u", threshold);
+    const D3D_SHADER_MACRO macros[] = { { "DLAA_COST_T", define }, { nullptr, nullptr } };
+    ID3DBlob *code = nullptr, *errors = nullptr;
+    HRESULT hr = compile(kDlaaCostMaskHlsl, sizeof(kDlaaCostMaskHlsl) - 1, "dlaa_cost.hlsl", macros, nullptr,
+                         "CSMain", "cs_5_0", 0, 0, &code, &errors);
+    if (FAILED(hr) || code == nullptr)
+    {
+        Log("[dlaa] cost-mask shader compile failed 0x%08X: %s", hr,
+            errors ? static_cast<const char *>(errors->GetBufferPointer()) : "(no log)");
+        if (errors) errors->Release();
+        return false;
+    }
+    if (errors) errors->Release();
+    D3D12_COMPUTE_PIPELINE_STATE_DESC pd = {};
+    pd.pRootSignature = g_scale_rs;
+    pd.CS.pShaderBytecode = code->GetBufferPointer();
+    pd.CS.BytecodeLength = code->GetBufferSize();
+    hr = h.dev->CreateComputePipelineState(&pd, IID_PPV_ARGS(&g_dlaa.cost_pso));
+    code->Release();
+    if (FAILED(hr)) { Log("[dlaa] cost-mask pipeline failed 0x%08X", hr); return false; }
+    g_dlaa.cost_pso_state = 1;
+    Log("[dlaa] motion-confidence mask ready (cost above %u marks the motion unreliable)", threshold);
+    return true;
 }
 
 // Every descriptor the frame uses, written once per (re)create: the textures
@@ -362,9 +573,11 @@ static bool BindDlaaDescriptors(VideoState &v)
         uav(g_dlaa.full, DXGI_FORMAT_R8G8B8A8_UNORM, at(kDlaaResDst));
     }
     uav(g_dlaa.mask, DXGI_FORMAT_R8_UNORM, at(kDlaaMaskUav));
+    uav(g_dlaa.mask, DXGI_FORMAT_R8_UNORM, at(kDlaaCostMaskUav));
     uav(g_dlaa.mask, DXGI_FORMAT_R8_UNORM, g_dlaa.cpu_heap->GetCPUDescriptorHandleForHeapStart());
     g_dlaa.bound_color = v.color.tex;
     g_dlaa.bound_mv = v.mv.tex;
+    g_dlaa.bound_cost = nullptr;   // written by the cost pass when NVOFA has a buffer
     return true;
 }
 
@@ -428,7 +641,7 @@ static bool EnsureDlaa(VideoState &v)
     // The stretch and the Boost passes are the worker's own scale and
     // residual shaders.
     const bool stretch = !boost && (v.w != fw || v.hgt != fh);
-    if ((stretch || boost) && !EnsureScalePipeline())
+    if (!EnsureScalePipeline())
     {
         DlaaRefuse(v, "the scale pipeline is unavailable");
         return false;
@@ -489,25 +702,29 @@ static bool EnsureDlaa(VideoState &v)
     { DlaaRefuse(v, "the GPU did not finish setting DLAA up"); return false; }
     // The flat plane is on the GPU now; its staging copy (33 MB at 4K) goes.
     g_dlaa.depth.upload->Release(); g_dlaa.depth.upload = nullptr;
-    const unsigned preset = g_dlaa.preset;
-    Log("[dlaa] enabled at %ux%u (frame %ux%u%s), motion %ux%u, preset %c, %s; flat depth and "
-        "estimated motion", w, height, fw, fh, boost ? ", Boost: composed onto the native frame" : "",
-        v.w, v.hgt, preset ? static_cast<char>('A' + preset - 1) : '-',
-        g_dlaa.via_core ? "NGX Core" : "direct");
+    // "[dlaa] enabled at" is a contract: settings_io parses it for the status line.
+    Log("[dlaa] enabled at %ux%u (frame %ux%u%s), motion %ux%u, preset %s, %s; flat depth and "
+        "estimated motion", w, height, fw, fh, boost ? ", Boost" : "",
+        v.w, v.hgt, DlaaPresetName(g_dlaa.preset), g_dlaa.via_core ? "NGX Core" : "direct");
     return true;
 }
 
-// The interface mask: 1 where the client found a still interface, 0 elsewhere.
-// Redrawn only when the rectangles change.
-static void DrawDlaaMask()
+// The bias mask: 1 where DLSS should trust the current frame - the still
+// interface the client found, and (opt-in) where NVOFA's cost says the motion
+// is a guess. Returns whether a mask is handed to DLSS this frame. The
+// rectangles alone are redrawn only when they change; with the cost pass the
+// mask is rebuilt on every evaluation, since the cost is.
+static bool DrawDlaaMask()
 {
     const uint32_t count = (std::min)(g_ui_rects.count, kUiRectsMax);
-    if (count == g_dlaa.mask_count &&
-        memcmp(g_dlaa.mask_rects, g_ui_rects.rects, sizeof(g_dlaa.mask_rects[0]) * count) == 0)
-        return;
+    auto &f = g_nvofa;
+    const bool cost = g_dlaa_cost_wanted && f.cost != nullptr && f.valid && EnsureDlaaCostPipeline();
+    const bool rects_changed = count != g_dlaa.mask_count ||
+        memcmp(g_dlaa.mask_rects, g_ui_rects.rects, sizeof(g_dlaa.mask_rects[0]) * count) != 0;
+    if (!cost && !rects_changed) return count > 0;
     g_dlaa.mask_count = count;
     memcpy(g_dlaa.mask_rects, g_ui_rects.rects, sizeof(g_dlaa.mask_rects[0]) * count);
-    if (count == 0) return;   // no mask is handed to DLSS then
+    if (!cost && count == 0) return false;   // no mask is handed to DLSS then
     auto to_uav = Transition(g_dlaa.mask, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                              D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     h.list->ResourceBarrier(1, &to_uav);
@@ -535,10 +752,47 @@ static void DrawDlaaMask()
                                    y0 + static_cast<LONG>(static_cast<uint64_t>(q[3]) * g_dlaa.height / 65535u));
         if (x1 > x0 && y1 > y0) rects[n++] = { x0, y0, x1, y1 };
     }
-    if (n > 0) h.list->ClearUnorderedAccessViewFloat(gpu, cpu, g_dlaa.mask, one, n, rects);
+    if (n > 0)
+    {
+        h.list->ClearUnorderedAccessViewFloat(gpu, cpu, g_dlaa.mask, one, n, rects);
+        h.list->ResourceBarrier(1, &between);
+    }
+    if (cost)
+    {
+        if (f.cost.get() != g_dlaa.bound_cost)
+        {
+            // NVOFA's buffer is new (its session was rebuilt): its descriptor
+            // is reissued. The buffer changes only with a rebuild, which waits
+            // for every submission, so no list in flight reads the old one.
+            D3D12_SHADER_RESOURCE_VIEW_DESC sd = {};
+            sd.Format = DXGI_FORMAT_R8_UINT;
+            sd.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            sd.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            sd.Texture2D.MipLevels = 1;
+            D3D12_CPU_DESCRIPTOR_HANDLE c = g_dlaa.heap->GetCPUDescriptorHandleForHeapStart();
+            c.ptr += static_cast<SIZE_T>(kDlaaCostSrc) *
+                     h.dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            h.dev->CreateShaderResourceView(f.cost.get(), &sd, c);
+            g_dlaa.bound_cost = f.cost.get();
+        }
+        const auto desc = f.cost->GetDesc();
+        auto cost_in = Transition(f.cost.get(), D3D12_RESOURCE_STATE_COMMON,
+                                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        h.list->ResourceBarrier(1, &cost_in);
+        h.list->SetComputeRootSignature(g_scale_rs);
+        h.list->SetPipelineState(g_dlaa.cost_pso);
+        const UINT sizes[4] = { g_dlaa.w, g_dlaa.height, static_cast<UINT>(desc.Width), desc.Height };
+        h.list->SetComputeRoot32BitConstants(0, 4, sizes, 0);
+        h.list->SetComputeRootDescriptorTable(1, DlaaGpuSlot(kDlaaCostSrc));
+        h.list->Dispatch((g_dlaa.w + 7) / 8, (g_dlaa.height + 7) / 8, 1);
+        auto cost_out = Transition(f.cost.get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                                   D3D12_RESOURCE_STATE_COMMON);
+        h.list->ResourceBarrier(1, &cost_out);
+    }
     auto to_srv = Transition(g_dlaa.mask, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     h.list->ResourceBarrier(1, &to_srv);
+    return true;
 }
 
 // Copy `result` (UNORDERED_ACCESS at rest) over v.color.tex.
@@ -559,26 +813,41 @@ static void DlaaShow(VideoState &v, ID3D12Resource *result)
     h.list->ResourceBarrier(_countof(post), post);
 }
 
+// The network takes DLAA's work-size result this frame (EvaluateVideo).
+static void DlaaFeedNr()
+{
+    g_dlaa_feeds_nr = true;
+    g_dlaa_feed_out = g_dlaa.output;
+    g_dlaa_feed_raw = g_dlaa.work_in;
+    g_dlaa_feed_strength = DlaaStrength();
+}
+
 // Called on every frame, after the capture and the motion upload and ahead of
 // everything that reads v.color.tex, in a submission of its own (queue order
 // puts it before the neural pass and the present). Nothing waits on it.
 //
 // color_written: the capture (or the pipe) wrote v.color.tex this frame.
-// still: it wrote the same picture as before. False only for a failure the
-// frame loop has to end on; a refusal turns DLAA off and the frame goes on.
-static bool RunDlaa(VideoState &v, bool color_written, bool still, bool reset)
+// still: it wrote the same picture as before. nr_consumes: the neural pass
+// runs on this frame under Boost and takes the work-size result (the full
+// frame is left as captured). False only for a failure the frame loop has to
+// end on; a refusal turns DLAA off and the frame goes on.
+static bool RunDlaa(VideoState &v, bool color_written, bool still, bool reset, bool nr_consumes)
 {
-    if (color_written) g_dlaa.color_is_result = false;
+    if (color_written) { g_dlaa.color_is_result = false; g_dlaa.fed_valid = false; }
     g_dlaa_raw_shown = nullptr;
+    g_dlaa_feeds_nr = false;
     if (!DlaaRequested() || !v.color_in_srv || !v.inputs_ready) return true;
-    // Nothing new, and the frame on screen is DLAA's already - unless the
-    // model changed, which has to show on a still desktop too (EnsureDlaa
-    // puts the capture back and the new model runs on it).
+    DlaaCollectTiming();
     const bool model_changed = g_dlaa.feature != nullptr && g_dlaa.preset != DlaaPreset();
-    if (!color_written && g_dlaa.color_is_result && !model_changed)
+    // Nothing new, and the result for this picture exists already: on screen
+    // (v.color.tex) or, in the feed mode, in output for the network - unless
+    // the model changed, which has to show on a still desktop too (EnsureDlaa
+    // puts the capture back and the new model runs on it).
+    const bool feed = nr_consumes && g_dlaa.boost;
+    if (!color_written && !model_changed)
     {
-        g_dlaa_raw_shown = g_dlaa.raw;
-        return true;
+        if (feed && g_dlaa.fed_valid) { DlaaFeedNr(); return true; }
+        if (!feed && g_dlaa.color_is_result) { g_dlaa_raw_shown = g_dlaa.raw; return true; }
     }
     // The HDR presentation composes the native HDR capture, not v.color: DLAA
     // would change only the SDR proxy under it.
@@ -588,12 +857,22 @@ static bool RunDlaa(VideoState &v, bool color_written, bool still, bool reset)
         return true;
     }
     if (!EnsureDlaa(v)) return !g_submission_failed;
+    const bool feeding = nr_consumes && g_dlaa.boost;
     const bool fresh_history = reset || !g_dlaa.history;
     if (!(color_written && still)) g_dlaa.still_evals = 0;
     ID3D12Resource *result = g_dlaa.boost ? g_dlaa.full : g_dlaa.output;
-    if (!BeginCommands()) return false;
     // A picture DLSS has settled on: shown from the last result, no evaluation.
-    if (color_written && still && !fresh_history && g_dlaa.still_evals >= kDlaaStillEvaluations)
+    const bool hold = color_written && still && !fresh_history &&
+                      g_dlaa.still_evals >= kDlaaStillEvaluations;
+    if (hold && feeding)
+    {
+        // output still holds the result; the network takes it. No commands.
+        g_dlaa.fed_valid = true;
+        DlaaFeedNr();
+        return true;
+    }
+    if (!BeginCommands()) return false;
+    if (hold)
     {
         DlaaShow(v, result);
         if (EndCommands() == 0) return false;
@@ -601,8 +880,12 @@ static bool RunDlaa(VideoState &v, bool color_written, bool still, bool reset)
         g_dlaa_raw_shown = g_dlaa.raw;
         return true;
     }
-    // The capture as it came, kept for the wipe and for switching off.
+    const int slot = h.frame_slot;
+    const bool timed = DlaaTimingReady();
+    if (timed) h.list->EndQuery(g_dlaa_time.heap, D3D12_QUERY_TYPE_TIMESTAMP, slot * 2);
+    if (!feeding)
     {
+        // The capture as it came, kept for the wipe and for switching off.
         D3D12_RESOURCE_BARRIER pre = Transition(v.color.tex, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                                                 D3D12_RESOURCE_STATE_COPY_SOURCE);
         h.list->ResourceBarrier(1, &pre);
@@ -650,15 +933,14 @@ static bool RunDlaa(VideoState &v, bool color_written, bool still, bool reset)
         scale_x = static_cast<float>(g_dlaa.w) / static_cast<float>(v.w);
         scale_y = static_cast<float>(g_dlaa.height) / static_cast<float>(v.hgt);
     }
-    DrawDlaaMask();
+    const bool masked = DrawDlaaMask();
     auto p = g_dlaa.params;
     p->Reset();
     p->Set(NVSDK_NGX_Parameter_Color, input);
     p->Set(NVSDK_NGX_Parameter_Output, g_dlaa.output);
     p->Set(NVSDK_NGX_Parameter_Depth, g_dlaa.depth.tex);
     p->Set(NVSDK_NGX_Parameter_MotionVectors, motion);
-    if (g_dlaa.mask_count > 0 && g_dlaa.mask_count != UINT32_MAX)
-        p->Set(NVSDK_NGX_Parameter_DLSS_Input_Bias_Current_Color_Mask, g_dlaa.mask);
+    if (masked) p->Set(NVSDK_NGX_Parameter_DLSS_Input_Bias_Current_Color_Mask, g_dlaa.mask);
     p->Set(NVSDK_NGX_Parameter_Jitter_Offset_X, 0.0f);
     p->Set(NVSDK_NGX_Parameter_Jitter_Offset_Y, 0.0f);
     p->Set(NVSDK_NGX_Parameter_Reset, fresh_history ? 1 : 0);
@@ -684,20 +966,22 @@ static bool RunDlaa(VideoState &v, bool color_written, bool still, bool reset)
         DlaaRefuse(v, "EvaluateFeature failed 0x%08X (%s)", evaluated, NgxResultName(evaluated));
         return !g_submission_failed;
     }
-    if (g_dlaa.boost)
+    if (g_dlaa.boost && !feeding)
     {
-        // native + (DLAA(small) - small), with NR's residual pass on DLAA's
-        // own descriptors.
+        // native + (DLAA(small) - small) * strength, with NR's residual pass
+        // on DLAA's own descriptors: the neural pass is off, so DLAA composes
+        // the full frame itself.
         auto out_srv = Transition(g_dlaa.output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         h.list->ResourceBarrier(1, &out_srv);
         h.list->SetDescriptorHeaps(1, heaps);
         h.list->SetComputeRootSignature(g_residual_rs);
         h.list->SetPipelineState(g_residual_pso);
-        UINT32 rc[3] = { g_dlaa.fw, g_dlaa.fh, 0 };
-        const float strength = 1.0f;
+        UINT32 rc[4] = { g_dlaa.fw, g_dlaa.fh, 0, 0 };
+        const float strength = DlaaStrength(), none = 0.0f;
         memcpy(&rc[2], &strength, sizeof(float));
-        h.list->SetComputeRoot32BitConstants(0, 3, rc, 0);
+        memcpy(&rc[3], &none, sizeof(float));
+        h.list->SetComputeRoot32BitConstants(0, 4, rc, 0);
         h.list->SetComputeRootDescriptorTable(1, DlaaGpuSlot(kDlaaResNative));
         h.list->Dispatch((g_dlaa.fw + 7) / 8, (g_dlaa.fh + 7) / 8, 1);
         auto out_uav = Transition(g_dlaa.output, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
@@ -710,12 +994,21 @@ static bool RunDlaa(VideoState &v, bool color_written, bool still, bool reset)
                                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         h.list->ResourceBarrier(1, &back);
     }
-    // The result replaces the capture: every consumer reads v.color.tex.
-    DlaaShow(v, result);
-    if (EndCommands() == 0) return false;
+    // The result replaces the capture: every consumer reads v.color.tex. In
+    // the feed mode the network reads output instead and the frame stays raw.
+    if (!feeding) DlaaShow(v, result);
+    if (timed)
+    {
+        h.list->EndQuery(g_dlaa_time.heap, D3D12_QUERY_TYPE_TIMESTAMP, slot * 2 + 1);
+        h.list->ResolveQueryData(g_dlaa_time.heap, D3D12_QUERY_TYPE_TIMESTAMP, slot * 2, 2,
+                                 g_dlaa_time.readback, sizeof(UINT64) * slot * 2);
+    }
+    const UINT64 fence = EndCommands();
+    if (fence == 0) return false;
+    if (timed) g_dlaa_time.fence[slot] = fence;
     g_dlaa.history = true;
-    g_dlaa.color_is_result = true;
-    g_dlaa_raw_shown = g_dlaa.raw;
+    if (feeding) { g_dlaa.fed_valid = true; DlaaFeedNr(); }
+    else { g_dlaa.color_is_result = true; g_dlaa_raw_shown = g_dlaa.raw; }
     if (color_written && still) ++g_dlaa.still_evals;
     return true;
 }

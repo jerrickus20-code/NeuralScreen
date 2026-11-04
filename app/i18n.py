@@ -2622,18 +2622,18 @@ STRINGS["zh"].update({"dim_on_rebuild": '重建时变暗'})
 STRINGS["ja"].update({"dim_on_rebuild": '再構築中は暗くする'})
 STRINGS["ko"].update({"dim_on_rebuild": '재구성 중 어둡게'})
 # FG interface protection (v2.6.0).
-STRINGS["en"].update({"fg_ui_protect": 'Protect the interface in FG/DLAA', "fg_ui_protect_hint": 'a still HUD and text are not smeared by motion'})
-STRINGS["ru"].update({"fg_ui_protect": 'Защита интерфейса в FG/DLAA', "fg_ui_protect_hint": 'неподвижный HUD и текст не размазываются движением'})
-STRINGS["fr"].update({"fg_ui_protect": "Protéger l'interface en FG/DLAA", "fg_ui_protect_hint": 'le HUD fixe et le texte ne sont pas étalés par le mouvement'})
-STRINGS["de"].update({"fg_ui_protect": 'Oberfläche in FG/DLAA schützen', "fg_ui_protect_hint": 'festes HUD und Text werden nicht von Bewegung verschmiert'})
-STRINGS["es"].update({"fg_ui_protect": 'Proteger la interfaz en FG/DLAA', "fg_ui_protect_hint": 'el HUD fijo y el texto no se emborronan con el movimiento'})
-STRINGS["it"].update({"fg_ui_protect": "Proteggi l'interfaccia in FG/DLAA", "fg_ui_protect_hint": 'HUD fisso e testo non vengono sbavati dal movimento'})
-STRINGS["pt"].update({"fg_ui_protect": 'Proteger a interface no FG/DLAA', "fg_ui_protect_hint": 'HUD fixo e texto não são borrados pelo movimento'})
-STRINGS["pl"].update({"fg_ui_protect": 'Ochrona interfejsu w FG/DLAA', "fg_ui_protect_hint": 'nieruchomy HUD i tekst nie są rozmazywane ruchem'})
-STRINGS["uk"].update({"fg_ui_protect": 'Захист інтерфейсу у FG/DLAA', "fg_ui_protect_hint": 'нерухомий HUD і текст не розмазуються рухом'})
-STRINGS["zh"].update({"fg_ui_protect": 'FG/DLAA 界面保护', "fg_ui_protect_hint": '静止的 HUD 和文字不会被运动拖糊'})
-STRINGS["ja"].update({"fg_ui_protect": 'FG/DLAA でインターフェースを保護', "fg_ui_protect_hint": '静止した HUD と文字が動きでにじまない'})
-STRINGS["ko"].update({"fg_ui_protect": 'FG/DLAA 인터페이스 보호', "fg_ui_protect_hint": '고정 HUD와 텍스트가 움직임에 번지지 않음'})
+STRINGS["en"].update({"fg_ui_protect": 'Protect the interface in FG', "fg_ui_protect_hint": 'a still HUD and text are not smeared by motion'})
+STRINGS["ru"].update({"fg_ui_protect": 'Защита интерфейса в FG', "fg_ui_protect_hint": 'неподвижный HUD и текст не размазываются движением'})
+STRINGS["fr"].update({"fg_ui_protect": "Protéger l'interface en FG", "fg_ui_protect_hint": 'le HUD fixe et le texte ne sont pas étalés par le mouvement'})
+STRINGS["de"].update({"fg_ui_protect": 'Oberfläche in FG schützen', "fg_ui_protect_hint": 'festes HUD und Text werden nicht von Bewegung verschmiert'})
+STRINGS["es"].update({"fg_ui_protect": 'Proteger la interfaz en FG', "fg_ui_protect_hint": 'el HUD fijo y el texto no se emborronan con el movimiento'})
+STRINGS["it"].update({"fg_ui_protect": "Proteggi l'interfaccia in FG", "fg_ui_protect_hint": 'HUD fisso e testo non vengono sbavati dal movimento'})
+STRINGS["pt"].update({"fg_ui_protect": 'Proteger a interface no FG', "fg_ui_protect_hint": 'HUD fixo e texto não são borrados pelo movimento'})
+STRINGS["pl"].update({"fg_ui_protect": 'Ochrona interfejsu w FG', "fg_ui_protect_hint": 'nieruchomy HUD i tekst nie są rozmazywane ruchem'})
+STRINGS["uk"].update({"fg_ui_protect": 'Захист інтерфейсу у FG', "fg_ui_protect_hint": 'нерухомий HUD і текст не розмазуються рухом'})
+STRINGS["zh"].update({"fg_ui_protect": 'FG 界面保护', "fg_ui_protect_hint": '静止的 HUD 和文字不会被运动拖糊'})
+STRINGS["ja"].update({"fg_ui_protect": 'FG でインターフェースを保護', "fg_ui_protect_hint": '静止した HUD と文字が動きでにじまない'})
+STRINGS["ko"].update({"fg_ui_protect": 'FG 인터페이스 보호', "fg_ui_protect_hint": '고정 HUD와 텍스트가 움직임에 번지지 않음'})
 # Redesign B (v2.6.0): the state tiles and the fold-out headers.
 STRINGS["en"].update({"tile_on": "On", "tile_off": "Off", "fold_net": "Network", "fold_tune": "Fine tuning", "fold_source": "Source and comparison"})
 STRINGS["ru"].update({"tile_on": "Вкл", "tile_off": "Выкл", "fold_net": "Сеть", "fold_tune": "Тонкая настройка", "fold_source": "Источник и сравнение"})
@@ -4022,9 +4022,9 @@ _DLAA_UI_STRINGS = {
     "en": {
         "hk_dlaa": "DLAA on/off", "dlaa_on": "DLAA ON", "dlaa_off": "DLAA OFF",
         "dlaa_model": "DLAA model", "dlaa_model_auto": "Auto (runtime's choice)",
-        "dlaa_model_j": "J – less ghosting, more flicker", "dlaa_model_k": "K – sharpest",
-        "dlaa_model_new": "{letter} – newer model, heavier",
-        "dlaa_model_hint": "Auto uses K on current runtimes; L and M cost more",
+        "dlaa_model_j": "J – like K, a little less ghosting, a little more flicker", "dlaa_model_k": "K – the default, best quality",
+        "dlaa_model_new": "{letter} – NVIDIA's Performance-mode model",
+        "dlaa_model_hint": "Auto is K on the 310 runtime; the line under the switch shows the cost",
         "dlaa_auto": "auto",
         "dlaa_hint_off": "smooths jagged edges and shimmer · SDR only",
         "dlaa_hint_starting": "starting…",
@@ -4040,9 +4040,9 @@ _DLAA_UI_STRINGS = {
     "ru": {
         "hk_dlaa": "DLAA вкл/выкл", "dlaa_on": "DLAA ВКЛ", "dlaa_off": "DLAA ВЫКЛ",
         "dlaa_model": "Модель DLAA", "dlaa_model_auto": "Авто (выбор рантайма)",
-        "dlaa_model_j": "J – меньше шлейфов, больше мерцания", "dlaa_model_k": "K – самая чёткая",
-        "dlaa_model_new": "{letter} – новая модель, тяжелее",
-        "dlaa_model_hint": "Авто — это K на текущих рантаймах; L и M дороже",
+        "dlaa_model_j": "J – как K, чуть меньше шлейфов, чуть больше мерцания", "dlaa_model_k": "K – по умолчанию, лучшее качество",
+        "dlaa_model_new": "{letter} – модель NVIDIA для режима Performance",
+        "dlaa_model_hint": "Авто — это K на рантайме 310; цену покажет строка ниже",
         "dlaa_auto": "авто",
         "dlaa_hint_off": "сглаживает лесенки и мерцание · только SDR",
         "dlaa_hint_starting": "запускается…",
@@ -4058,9 +4058,9 @@ _DLAA_UI_STRINGS = {
     "uk": {
         "hk_dlaa": "DLAA увімк/вимк", "dlaa_on": "DLAA УВІМК", "dlaa_off": "DLAA ВИМК",
         "dlaa_model": "Модель DLAA", "dlaa_model_auto": "Авто (вибір рантайму)",
-        "dlaa_model_j": "J – менше шлейфів, більше мерехтіння", "dlaa_model_k": "K – найчіткіша",
-        "dlaa_model_new": "{letter} – новіша модель, важча",
-        "dlaa_model_hint": "Авто — це K на поточних рантаймах; L і M дорожчі",
+        "dlaa_model_j": "J – як K, трохи менше шлейфів, трохи більше мерехтіння", "dlaa_model_k": "K – за замовчуванням, найкраща якість",
+        "dlaa_model_new": "{letter} – модель NVIDIA для режиму Performance",
+        "dlaa_model_hint": "Авто — це K на рантаймі 310; ціну покаже рядок під перемикачем",
         "dlaa_auto": "авто",
         "dlaa_hint_off": "згладжує сходинки й мерехтіння · лише SDR",
         "dlaa_hint_starting": "запускається…",
@@ -4076,9 +4076,9 @@ _DLAA_UI_STRINGS = {
     "fr": {
         "hk_dlaa": "DLAA marche/arrêt", "dlaa_on": "DLAA activé", "dlaa_off": "DLAA désactivé",
         "dlaa_model": "Modèle DLAA", "dlaa_model_auto": "Auto (choix du runtime)",
-        "dlaa_model_j": "J – moins de traînées, plus de scintillement", "dlaa_model_k": "K – le plus net",
-        "dlaa_model_new": "{letter} – modèle plus récent, plus lourd",
-        "dlaa_model_hint": "Auto utilise K sur les runtimes actuels ; L et M coûtent plus",
+        "dlaa_model_j": "J – comme K, un peu moins de traînées, un peu plus de scintillement", "dlaa_model_k": "K – par défaut, meilleure qualité",
+        "dlaa_model_new": "{letter} – modèle NVIDIA du mode Performance",
+        "dlaa_model_hint": "Auto = K sur le runtime 310 ; la ligne sous l'interrupteur donne le coût",
         "dlaa_auto": "auto",
         "dlaa_hint_off": "lisse le crénelage et le scintillement · SDR seulement",
         "dlaa_hint_starting": "démarrage…",
@@ -4094,9 +4094,9 @@ _DLAA_UI_STRINGS = {
     "de": {
         "hk_dlaa": "DLAA an/aus", "dlaa_on": "DLAA AN", "dlaa_off": "DLAA AUS",
         "dlaa_model": "DLAA-Modell", "dlaa_model_auto": "Auto (Wahl der Runtime)",
-        "dlaa_model_j": "J – weniger Schlieren, mehr Flimmern", "dlaa_model_k": "K – am schärfsten",
-        "dlaa_model_new": "{letter} – neueres Modell, aufwendiger",
-        "dlaa_model_hint": "Auto nutzt K bei aktuellen Runtimes; L und M kosten mehr",
+        "dlaa_model_j": "J – wie K, etwas weniger Schlieren, etwas mehr Flimmern", "dlaa_model_k": "K – Standard, beste Qualität",
+        "dlaa_model_new": "{letter} – NVIDIAs Modell für den Performance-Modus",
+        "dlaa_model_hint": "Auto ist K auf Runtime 310; die Zeile darunter zeigt die Kosten",
         "dlaa_auto": "auto",
         "dlaa_hint_off": "glättet Treppenstufen und Flimmern · nur SDR",
         "dlaa_hint_starting": "startet…",
@@ -4112,9 +4112,9 @@ _DLAA_UI_STRINGS = {
     "es": {
         "hk_dlaa": "DLAA sí/no", "dlaa_on": "DLAA activado", "dlaa_off": "DLAA desactivado",
         "dlaa_model": "Modelo DLAA", "dlaa_model_auto": "Auto (elige el runtime)",
-        "dlaa_model_j": "J – menos estelas, más parpadeo", "dlaa_model_k": "K – el más nítido",
-        "dlaa_model_new": "{letter} – modelo más nuevo, más pesado",
-        "dlaa_model_hint": "Auto usa K en los runtimes actuales; L y M cuestan más",
+        "dlaa_model_j": "J – como K, algo menos de estelas, algo más de parpadeo", "dlaa_model_k": "K – por defecto, la mejor calidad",
+        "dlaa_model_new": "{letter} – modelo de NVIDIA para el modo Performance",
+        "dlaa_model_hint": "Auto es K en el runtime 310; la línea de abajo muestra el coste",
         "dlaa_auto": "auto",
         "dlaa_hint_off": "suaviza dientes de sierra y parpadeo · solo SDR",
         "dlaa_hint_starting": "iniciando…",
@@ -4130,9 +4130,9 @@ _DLAA_UI_STRINGS = {
     "it": {
         "hk_dlaa": "Attiva/disattiva DLAA", "dlaa_on": "DLAA attivo", "dlaa_off": "DLAA disattivato",
         "dlaa_model": "Modello DLAA", "dlaa_model_auto": "Auto (sceglie il runtime)",
-        "dlaa_model_j": "J – meno scie, più sfarfallio", "dlaa_model_k": "K – il più nitido",
-        "dlaa_model_new": "{letter} – modello più recente, più pesante",
-        "dlaa_model_hint": "Auto usa K con i runtime attuali; L e M costano di più",
+        "dlaa_model_j": "J – come K, un po' meno scie, un po' più sfarfallio", "dlaa_model_k": "K – predefinito, qualità migliore",
+        "dlaa_model_new": "{letter} – modello NVIDIA per la modalità Performance",
+        "dlaa_model_hint": "Auto è K sul runtime 310; la riga sotto l'interruttore mostra il costo",
         "dlaa_auto": "auto",
         "dlaa_hint_off": "smussa scalettature e sfarfallio · solo SDR",
         "dlaa_hint_starting": "avvio…",
@@ -4148,9 +4148,9 @@ _DLAA_UI_STRINGS = {
     "pt": {
         "hk_dlaa": "Ligar/desligar DLAA", "dlaa_on": "DLAA ligado", "dlaa_off": "DLAA desligado",
         "dlaa_model": "Modelo DLAA", "dlaa_model_auto": "Auto (escolha do runtime)",
-        "dlaa_model_j": "J – menos rastros, mais cintilação", "dlaa_model_k": "K – o mais nítido",
-        "dlaa_model_new": "{letter} – modelo mais novo, mais pesado",
-        "dlaa_model_hint": "Auto usa K nos runtimes atuais; L e M custam mais",
+        "dlaa_model_j": "J – como K, um pouco menos rastros, um pouco mais cintilação", "dlaa_model_k": "K – padrão, melhor qualidade",
+        "dlaa_model_new": "{letter} – modelo da NVIDIA para o modo Performance",
+        "dlaa_model_hint": "Auto é K no runtime 310; a linha sob o interruptor mostra o custo",
         "dlaa_auto": "auto",
         "dlaa_hint_off": "suaviza serrilhado e cintilação · só SDR",
         "dlaa_hint_starting": "iniciando…",
@@ -4166,9 +4166,9 @@ _DLAA_UI_STRINGS = {
     "pl": {
         "hk_dlaa": "DLAA wł./wył.", "dlaa_on": "DLAA wł.", "dlaa_off": "DLAA wył.",
         "dlaa_model": "Model DLAA", "dlaa_model_auto": "Auto (wybór runtime'u)",
-        "dlaa_model_j": "J – mniej smużenia, więcej migotania", "dlaa_model_k": "K – najostrzejszy",
-        "dlaa_model_new": "{letter} – nowszy model, cięższy",
-        "dlaa_model_hint": "Auto używa K w obecnych runtime'ach; L i M kosztują więcej",
+        "dlaa_model_j": "J – jak K, nieco mniej smużenia, nieco więcej migotania", "dlaa_model_k": "K – domyślny, najlepsza jakość",
+        "dlaa_model_new": "{letter} – model NVIDIA dla trybu Performance",
+        "dlaa_model_hint": "Auto to K na runtime 310; wiersz pod przełącznikiem pokazuje koszt",
         "dlaa_auto": "auto",
         "dlaa_hint_off": "wygładza schodki i migotanie · tylko SDR",
         "dlaa_hint_starting": "uruchamianie…",
@@ -4184,9 +4184,9 @@ _DLAA_UI_STRINGS = {
     "zh": {
         "hk_dlaa": "DLAA 开/关", "dlaa_on": "DLAA 开", "dlaa_off": "DLAA 关",
         "dlaa_model": "DLAA 模型", "dlaa_model_auto": "自动（由运行时选择）",
-        "dlaa_model_j": "J – 拖影更少，闪烁更多", "dlaa_model_k": "K – 最清晰",
-        "dlaa_model_new": "{letter} – 较新模型，开销更大",
-        "dlaa_model_hint": "自动在当前运行时上使用 K；L 和 M 开销更大",
+        "dlaa_model_j": "J – 与 K 相近，拖影略少，闪烁略多", "dlaa_model_k": "K – 默认，画质最佳",
+        "dlaa_model_new": "{letter} – NVIDIA 的 Performance 模式模型",
+        "dlaa_model_hint": "自动在 310 运行时上为 K；开关下方的行显示各模型的开销",
         "dlaa_auto": "自动",
         "dlaa_hint_off": "平滑锯齿和闪烁 · 仅限 SDR",
         "dlaa_hint_starting": "正在启动…",
@@ -4202,9 +4202,9 @@ _DLAA_UI_STRINGS = {
     "ja": {
         "hk_dlaa": "DLAA オン/オフ", "dlaa_on": "DLAA オン", "dlaa_off": "DLAA オフ",
         "dlaa_model": "DLAA モデル", "dlaa_model_auto": "自動（ランタイムが選択）",
-        "dlaa_model_j": "J – 残像が少なく、ちらつきが多い", "dlaa_model_k": "K – 最も鮮明",
-        "dlaa_model_new": "{letter} – 新しいモデル、より重い",
-        "dlaa_model_hint": "自動は現行ランタイムで K を使用。L と M は負荷が高い",
+        "dlaa_model_j": "J – K に近く、残像がやや少なく、ちらつきがやや多い", "dlaa_model_k": "K – 既定、最高画質",
+        "dlaa_model_new": "{letter} – NVIDIA の Performance モード用モデル",
+        "dlaa_model_hint": "自動は 310 ランタイムで K。スイッチ下の行に各モデルのコストが出ます",
         "dlaa_auto": "自動",
         "dlaa_hint_off": "ジャギーとちらつきを滑らかに · SDR のみ",
         "dlaa_hint_starting": "起動中…",
@@ -4220,9 +4220,9 @@ _DLAA_UI_STRINGS = {
     "ko": {
         "hk_dlaa": "DLAA 켜기/끄기", "dlaa_on": "DLAA 켜짐", "dlaa_off": "DLAA 꺼짐",
         "dlaa_model": "DLAA 모델", "dlaa_model_auto": "자동(런타임 선택)",
-        "dlaa_model_j": "J – 잔상 적음, 깜빡임 많음", "dlaa_model_k": "K – 가장 선명",
-        "dlaa_model_new": "{letter} – 최신 모델, 더 무거움",
-        "dlaa_model_hint": "자동은 현재 런타임에서 K 사용; L과 M은 부담이 큼",
+        "dlaa_model_j": "J – K와 비슷, 잔상 조금 적고 깜빡임 조금 많음", "dlaa_model_k": "K – 기본, 최고 화질",
+        "dlaa_model_new": "{letter} – NVIDIA의 Performance 모드 모델",
+        "dlaa_model_hint": "자동은 310 런타임에서 K; 스위치 아래 줄이 각 모델의 비용 표시",
         "dlaa_auto": "자동",
         "dlaa_hint_off": "계단 현상과 깜빡임을 부드럽게 · SDR 전용",
         "dlaa_hint_starting": "시작 중…",
@@ -4237,5 +4237,85 @@ _DLAA_UI_STRINGS = {
     },
 }
 for _lang, _extra in _DLAA_UI_STRINGS.items():
+    STRINGS[_lang].update(_extra)
+del _lang, _extra
+
+# DLAA under Boost: how much of its correction the composite adds; the two
+# masks that tell DLSS to trust the current frame.
+_DLAA_MORE_STRINGS = {
+    "en": {"dlaa_strength": "DLAA strength (Boost)",
+           "dlaa_strength_hint": "lower = sharper but more jagged; 100% = full anti-aliasing",
+           "dlaa_ui_protect": "Protect the interface in DLAA",
+           "dlaa_ui_protect_hint": "a still HUD and text are not smeared by motion",
+           "dlaa_motion_mask": "Trust the frame where motion is unsure",
+           "dlaa_motion_mask_hint": "less ghosting in motion, a little more flicker there (experimental)"},
+    "ru": {"dlaa_strength": "Сила DLAA (Boost)",
+           "dlaa_strength_hint": "меньше — резче, но с лесенками; 100% — полное сглаживание",
+           "dlaa_ui_protect": "Защита интерфейса в DLAA",
+           "dlaa_ui_protect_hint": "неподвижный HUD и текст не размазываются движением",
+           "dlaa_motion_mask": "Доверять кадру там, где движение неясно",
+           "dlaa_motion_mask_hint": "меньше шлейфов в движении, чуть больше мерцания (опыт)"},
+    "uk": {"dlaa_strength": "Сила DLAA (Boost)",
+           "dlaa_strength_hint": "менше — різкіше, але зі сходинками; 100% — повне згладжування",
+           "dlaa_ui_protect": "Захист інтерфейсу в DLAA",
+           "dlaa_ui_protect_hint": "нерухомий HUD і текст не розмазуються рухом",
+           "dlaa_motion_mask": "Довіряти кадру там, де рух невизначений",
+           "dlaa_motion_mask_hint": "менше шлейфів у русі, трохи більше мерехтіння (експеримент)"},
+    "fr": {"dlaa_strength": "Intensité DLAA (Boost)",
+           "dlaa_strength_hint": "moins = plus net mais plus crénelé ; 100 % = anticrénelage complet",
+           "dlaa_ui_protect": "Protéger l'interface en DLAA",
+           "dlaa_ui_protect_hint": "le HUD fixe et le texte ne sont pas étalés par le mouvement",
+           "dlaa_motion_mask": "Faire confiance à l'image où le mouvement est incertain",
+           "dlaa_motion_mask_hint": "moins de traînées en mouvement, un peu plus de scintillement (essai)"},
+    "de": {"dlaa_strength": "DLAA-Stärke (Boost)",
+           "dlaa_strength_hint": "weniger = schärfer, aber mehr Treppen; 100 % = volle Glättung",
+           "dlaa_ui_protect": "Oberfläche in DLAA schützen",
+           "dlaa_ui_protect_hint": "festes HUD und Text werden nicht von Bewegung verschmiert",
+           "dlaa_motion_mask": "Dem Bild trauen, wo die Bewegung unsicher ist",
+           "dlaa_motion_mask_hint": "weniger Schlieren in Bewegung, etwas mehr Flimmern (experimentell)"},
+    "es": {"dlaa_strength": "Intensidad de DLAA (Boost)",
+           "dlaa_strength_hint": "menos = más nítido pero más dentado; 100 % = suavizado completo",
+           "dlaa_ui_protect": "Proteger la interfaz en DLAA",
+           "dlaa_ui_protect_hint": "el HUD fijo y el texto no se emborronan con el movimiento",
+           "dlaa_motion_mask": "Confiar en el fotograma donde el movimiento es dudoso",
+           "dlaa_motion_mask_hint": "menos estelas en movimiento, algo más de parpadeo (experimental)"},
+    "it": {"dlaa_strength": "Intensità DLAA (Boost)",
+           "dlaa_strength_hint": "meno = più nitido ma più scalettato; 100% = antialiasing completo",
+           "dlaa_ui_protect": "Proteggi l'interfaccia in DLAA",
+           "dlaa_ui_protect_hint": "HUD fisso e testo non vengono sbavati dal movimento",
+           "dlaa_motion_mask": "Fidati del frame dove il movimento è incerto",
+           "dlaa_motion_mask_hint": "meno scie in movimento, un po' più sfarfallio lì (sperimentale)"},
+    "pt": {"dlaa_strength": "Intensidade do DLAA (Boost)",
+           "dlaa_strength_hint": "menos = mais nítido mas mais serrilhado; 100% = suavização completa",
+           "dlaa_ui_protect": "Proteger a interface no DLAA",
+           "dlaa_ui_protect_hint": "HUD fixo e texto não são borrados pelo movimento",
+           "dlaa_motion_mask": "Confiar no quadro onde o movimento é incerto",
+           "dlaa_motion_mask_hint": "menos rastros em movimento, mais cintilação ali (experimental)"},
+    "pl": {"dlaa_strength": "Siła DLAA (Boost)",
+           "dlaa_strength_hint": "mniej = ostrzej, ale więcej schodków; 100% = pełne wygładzanie",
+           "dlaa_ui_protect": "Ochrona interfejsu w DLAA",
+           "dlaa_ui_protect_hint": "nieruchomy HUD i tekst nie są rozmazywane ruchem",
+           "dlaa_motion_mask": "Ufaj klatce tam, gdzie ruch jest niepewny",
+           "dlaa_motion_mask_hint": "mniej smużenia w ruchu, nieco więcej migotania (eksperyment)"},
+    "zh": {"dlaa_strength": "DLAA 强度（Boost）",
+           "dlaa_strength_hint": "越低越锐利但锯齿更多；100% 为完全抗锯齿",
+           "dlaa_ui_protect": "DLAA 界面保护",
+           "dlaa_ui_protect_hint": "静止的 HUD 和文字不会被运动拖糊",
+           "dlaa_motion_mask": "运动不确定处信任当前帧",
+           "dlaa_motion_mask_hint": "运动处拖影更少，闪烁略多（实验性）"},
+    "ja": {"dlaa_strength": "DLAA の強さ（Boost）",
+           "dlaa_strength_hint": "低いほど鮮明だがジャギーが増える。100% で完全な AA",
+           "dlaa_ui_protect": "DLAA でインターフェースを保護",
+           "dlaa_ui_protect_hint": "静止した HUD と文字が動きでにじまない",
+           "dlaa_motion_mask": "動きが不確かな所は現在のフレームを信頼",
+           "dlaa_motion_mask_hint": "動く部分の残像が減り、ちらつきが少し増える（実験的）"},
+    "ko": {"dlaa_strength": "DLAA 강도(Boost)",
+           "dlaa_strength_hint": "낮을수록 선명하지만 계단 현상 증가; 100% = 완전한 AA",
+           "dlaa_ui_protect": "DLAA 인터페이스 보호",
+           "dlaa_ui_protect_hint": "고정 HUD와 텍스트가 움직임에 번지지 않음",
+           "dlaa_motion_mask": "움직임이 불확실한 곳은 현재 프레임 신뢰",
+           "dlaa_motion_mask_hint": "움직임 부분 잔상 감소, 깜빡임 약간 증가(실험적)"},
+}
+for _lang, _extra in _DLAA_MORE_STRINGS.items():
     STRINGS[_lang].update(_extra)
 del _lang, _extra

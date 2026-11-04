@@ -42,7 +42,7 @@ import commands
 import pipeline
 import protocol
 import settings_io
-from test_ui_buttons import build, find, paint, click
+from test_ui_buttons import build, find, paint, click, into_view
 
 NATIVE = ROOT / "native"
 
@@ -240,8 +240,19 @@ def main() -> int:
     got = parse(["[dlaa] enabled at 3840x2160 (frame 3840x2160), motion 2496x1404, "
                  "preset K, direct; flat depth and estimated motion", "[dlaa] UI: on"])
     if got != {"state": "running", "size": "3840×2160", "boost": False, "model": "K",
-               "core": False}:
+               "auto": False, "core": False}:
         failures.append(f"the running line parses as {got}")
+    # Auto resolved by the runtime, Boost, and the cost line newer than it.
+    got = parse(["[dlaa] cost 6.1 ms avg, 8.2 ms max, 118 frames (the whole DLAA submission)",
+                 "[dlaa] enabled at 1664x1040 (frame 2560x1600, Boost), motion 1664x1040, "
+                 "preset auto=K, direct; flat depth and estimated motion", "[dlaa] UI: on"])
+    if got != {"state": "running", "size": "1664×1040", "boost": True, "model": "K",
+               "auto": True, "core": False, "ms": 6.1}:
+        failures.append(f"the Boost/auto/cost lines parse as {got}")
+    line = hint_for({"dlaa": True, "dlaa_status": got})
+    for part in ("K (auto)", "6.1 ms", "Boost"):
+        if part not in line:
+            failures.append(f"the status line {line!r} lacks {part!r}")
     if parse(["[dlaa] off: the HDR presentation shows ..."]) != {"state": "failed", "reason": "hdr"}:
         failures.append("an HDR refusal is not told apart")
     if parse(["[host] nothing about DLAA"], {"state": "running"}) != {"state": "running"}:
@@ -259,25 +270,85 @@ def main() -> int:
         failures.append("the DLAA hotkey command is not handled")
 
     worker = SimpleNamespace(stdin=io.BytesIO())
-    protocol.send_dlaa_model(worker, "M")
+    protocol.send_dlaa_model(worker, "M", 0.5, True)
     if struct.unpack(protocol.FRAME_FMT, worker.stdin.getvalue()) != (
-            protocol.DLAA_PRESET_MAGIC, 13, 0, 0, 0):
-        failures.append("DLAP does not carry the model in the index field")
+            protocol.DLAA_PRESET_MAGIC, 13, 1, 500, 0):
+        failures.append("DLAP does not carry the model, the mask bit and the strength")
+    worker = SimpleNamespace(stdin=io.BytesIO())
+    protocol.send_dlaa_model(worker, "auto", 0.0, False)
+    if struct.unpack(protocol.FRAME_FMT, worker.stdin.getvalue())[3] != 1:
+        failures.append("a strength of 0 must not be sent as 0 (the worker reads that as unset)")
     m = re.search(r"DLAA_PRESET_MAGIC\s*=\s*(0x[0-9A-Fa-f]+)u;", host)
     if m is None or int(m.group(1), 16) != protocol.DLAA_PRESET_MAGIC:
         failures.append("the worker's DLAP magic differs from protocol.py")
     sent_models = []
     st = SimpleNamespace(cfg={"dlaa_model": "L"}, worker_logs=["[host] up"],
                          worker=SimpleNamespace(pid=5, poll=lambda: None))
-    with patch.object(protocol, "send_dlaa_model", lambda w, model: sent_models.append(model)):
+    with patch.object(protocol, "send_dlaa_model",
+                      lambda w, model, strength, mask: sent_models.append((model, strength, mask))):
         commands.update_dlaa_model(st)                 # no [dlaa] line yet: an old worker?
         st.worker_logs.append("[dlaa] UI: off")
         commands.update_dlaa_model(st)
         commands.update_dlaa_model(st)                 # unchanged: not again
         st.cfg["dlaa_model"] = "K"
         commands.update_dlaa_model(st)
-    if sent_models != ["L", "K"]:
+        st.cfg["dlaa_strength"] = 0.5                  # the slider and the mask ride along
+        commands.update_dlaa_model(st)
+        st.cfg["dlaa_motion_mask"] = True
+        commands.update_dlaa_model(st)
+    if sent_models != [("L", 1.0, False), ("K", 1.0, False), ("K", 0.5, False), ("K", 0.5, True)]:
         failures.append(f"the model is sent {sent_models}, not once per worker and change")
+
+    # 8. The strength slider (Boost only), the two mask switches, the counter.
+    menu.set_state({"dlaa": True, "nr_small": False})
+    paint(menu)
+    if find(menu, "slider", "dlaa_strength") is not None:
+        failures.append("the strength slider is laid out without Boost, where it changes nothing")
+    menu.set_state({"dlaa": True, "nr_small": True, "work_size": "1664x1040"})
+    paint(menu)
+    sl = find(menu, "slider", "dlaa_strength")
+    if sl is None:
+        failures.append("no strength slider under Boost")
+    else:
+        sl = into_view(menu, sl)
+        track = sl.extra.get("track")
+        out = menu.handle_event(pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN, {"pos": (track.x + track.w // 2, track.centery), "button": 1}))
+        if not out or out[0][0] != "dlaa_strength":
+            failures.append(f"the strength slider emits {out}")
+    st = SimpleNamespace(cfg={}, display=SimpleNamespace(menu=SimpleNamespace(set_state=lambda d: None)))
+    with patch.object(settings_io, "save_menu_layout"):
+        commands.apply_menu_action(st, ("dlaa_strength", 0.25))
+        commands.apply_menu_action(st, ("dlaa_strength", 7))
+        commands.apply_menu_action(st, ("toggle", "dlaa_ui_protect"))
+        commands.apply_menu_action(st, ("toggle", "dlaa_motion_mask"))
+    if st.cfg.get("dlaa_strength") != 1.0 or st.cfg.get("dlaa_ui_protect") is not False \
+            or st.cfg.get("dlaa_motion_mask") is not True:
+        failures.append(f"the new controls do not reach the config: {st.cfg}")
+    for key in ("dlaa_ui_protect", "dlaa_motion_mask"):
+        if find(menu, "toggle", key) is None:
+            failures.append(f"no {key} switch in the Network block")
+    # DLAA's protection is on by default and serves DLAA with FG's switch off.
+    sent = []
+    st = SimpleNamespace(cfg={"dlaa": True, "fg_ui_protect": False}, gray_active=True,
+                         worker=SimpleNamespace(pid=7, poll=lambda: None),
+                         shm=SimpleNamespace(read_gray=lambda: np.zeros((180, 320), np.uint8)),
+                         ui_detector=SimpleNamespace(update=lambda gray: [(1, 2, 3, 4)],
+                                                     reset=lambda: None),
+                         ui_rects_sent=None)
+    with patch.object(protocol, "send_ui_rects", lambda worker, rects: sent.append(rects)):
+        commands._update_ui_protection(st)
+    if sent != [[(1, 2, 3, 4)]]:
+        failures.append(f"DLAA's own protection switch is not on by default: {sent}")
+    s_en = overlay_ui.STRINGS["en"]
+    hud = overlay_ui.status_readings(
+        {}, {"fps": 55.0, "nr": False, "gpu_ok": True, "dlaa_running": True}, s_en)
+    if not any("DLAA" in line and "55.0" in line for line in hud):
+        failures.append(f"with NR off and DLAA running the counter shows {hud}")
+    hud = overlay_ui.status_readings(
+        {}, {"fps": 55.0, "nr": False, "gpu_ok": True, "dlaa_running": False}, s_en)
+    if any("DLAA" in line for line in hud):
+        failures.append("with DLAA not running the counter must not claim a DLAA rate")
 
     for f in failures:
         print("FAIL:", f)

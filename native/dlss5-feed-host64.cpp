@@ -2007,6 +2007,19 @@ static constexpr uint32_t FRAME_FLAG_SPLIT = 0x20u;
 // is its state; an older client sends neither and NS_DLAA decides.
 static constexpr uint32_t FRAME_FLAG_DLAA = 0x40u;
 static constexpr uint32_t FRAME_FLAG_DLAA_SET = 0x80u;
+// What DLAA (dlaa.inl, included further down) shares with the passes that
+// run before it in this file. With Boost and the neural pass both on, DLAA
+// hands the network its work-size result instead of composing it into the
+// full frame for the network to shrink again: g_dlaa_feeds_nr says so for
+// this frame, g_dlaa_feed_out is that result (UNORDERED_ACCESS at rest),
+// g_dlaa_feed_raw the plain downscale it was made from (NON_PIXEL_SHADER_RESOURCE
+// at rest) and g_dlaa_feed_strength how much of DLAA's correction the residual
+// composite adds. g_dlaa_cost_wanted asks NVOFA for its cost (confidence)
+// buffer, which DLAA turns into a mask where the motion is unreliable.
+static bool g_dlaa_feeds_nr = false;
+static ID3D12Resource *g_dlaa_feed_out = nullptr, *g_dlaa_feed_raw = nullptr;
+static float g_dlaa_feed_strength = 1.0f;
+static bool g_dlaa_cost_wanted = false;
 // bit 13: answer as soon as the frame is on the GPU queue, not once it has
 // been presented. The client's own per-frame work - the HUD, the commands, the
 // next capture request - then runs while the GPU finishes this frame instead
@@ -4047,12 +4060,18 @@ static const char kScaleHlsl[] =
 // works on those values, so the delta matches its input). Not linear light:
 // deliberate, and the place to look first if shadows ever misbehave.
 // while the cheap low-res network does the relighting.
+// A fourth input (gRaw) and a second strength for DLAA under Boost: the
+// network then runs on DLAA's work-size result (nr_in), and the composite adds
+// both corrections - the network's (nr_out - nr_in) and DLAA's (nr_in - raw,
+// raw being the plain downscale) - each with its own strength. Without DLAA
+// the caller passes nr_in for gRaw and 0 for gStrength2, and nothing changes.
 static const char kResidualHlsl[] =
     "Texture2D<float4>   gNative : register(t0);\n"
     "Texture2D<float4>   gNrIn   : register(t1);\n"
     "Texture2D<float4>   gNrOut  : register(t2);\n"
+    "Texture2D<float4>   gRaw    : register(t3);\n"
     "RWTexture2D<float4> gDst    : register(u0);\n"
-    "cbuffer RC : register(b0) { uint gW; uint gH; float gStrength; };\n"
+    "cbuffer RC : register(b0) { uint gW; uint gH; float gStrength; float gStrength2; };\n"
     "SamplerState gSamp : register(s0);\n"
     "[numthreads(8, 8, 1)]\n"
     "void CSMain(uint3 id : SV_DispatchThreadID)\n"
@@ -4062,8 +4081,9 @@ static const char kResidualHlsl[] =
     "    float3 native = gNative[id.xy].rgb;\n"
     "    float3 nrIn  = gNrIn.SampleLevel(gSamp, uv, 0).rgb;\n"
     "    float3 nrOut = gNrOut.SampleLevel(gSamp, uv, 0).rgb;\n"
-    "    float3 result = max(native + (nrOut - nrIn) * gStrength, 0.0);\n"
-    "    gDst[id.xy] = float4(result, 1.0);\n"
+    "    float3 raw   = gRaw.SampleLevel(gSamp, uv, 0).rgb;\n"
+    "    float3 result = native + (nrOut - nrIn) * gStrength + (nrIn - raw) * gStrength2;\n"
+    "    gDst[id.xy] = float4(max(result, 0.0), 1.0);\n"
     "}\n";
 
 typedef HRESULT(WINAPI *PFN_D3DCompile_)(LPCVOID, SIZE_T, LPCSTR, const void *, void *,
@@ -4267,18 +4287,18 @@ static bool EnsureScalePipeline()
 
     D3D12_DESCRIPTOR_RANGE rres[2] = {};
     rres[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    rres[0].NumDescriptors = 3;
+    rres[0].NumDescriptors = 4;
     rres[0].BaseShaderRegister = 0;
     rres[0].OffsetInDescriptorsFromTableStart = 0;
     rres[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     rres[1].NumDescriptors = 1;
     rres[1].BaseShaderRegister = 0;
-    rres[1].OffsetInDescriptorsFromTableStart = 3;
+    rres[1].OffsetInDescriptorsFromTableStart = 4;
 
     D3D12_ROOT_PARAMETER rparams[2] = {};
     rparams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     rparams[0].Constants.ShaderRegister = 0;
-    rparams[0].Constants.Num32BitValues = 3;   // gW, gH, gStrength
+    rparams[0].Constants.Num32BitValues = 4;   // gW, gH, gStrength, gStrength2
     rparams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     rparams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     rparams[1].DescriptorTable.NumDescriptorRanges = 2;
@@ -4318,7 +4338,7 @@ static bool EnsureScalePipeline()
 
     D3D12_DESCRIPTOR_HEAP_DESC rhd = {};
     rhd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    rhd.NumDescriptors = 4;
+    rhd.NumDescriptors = 5;
     rhd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     hr = h.dev->CreateDescriptorHeap(&rhd, __uuidof(ID3D12DescriptorHeap),
                                      reinterpret_cast<void **>(&g_residual_heap));
@@ -4417,11 +4437,13 @@ static void ScaleColorInto(ID3D12Resource *src, UINT sw, UINT sh,
 // The residual composite needs three SRVs + one UAV, descriptor at slot 0.
 // Recreated only when the resources change (RNSZ, MOTS, per-frame pointers
 // are stable across frames in the steady state).
+static ID3D12Resource *g_res_raw_bound;
 static void BindResidualDescriptors(ID3D12Resource *native, ID3D12Resource *nr_in,
-                                    ID3D12Resource *nr_out, ID3D12Resource *dst)
+                                    ID3D12Resource *nr_out, ID3D12Resource *dst,
+                                    ID3D12Resource *raw)
 {
     if (native == g_res_native_bound && nr_in == g_res_in_bound &&
-        nr_out == g_res_out_bound && dst == g_res_dst_bound)
+        nr_out == g_res_out_bound && dst == g_res_dst_bound && raw == g_res_raw_bound)
         return;
     const UINT stride = h.dev->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -4432,10 +4454,10 @@ static void BindResidualDescriptors(ID3D12Resource *native, ID3D12Resource *nr_i
     sd.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     sd.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     sd.Texture2D.MipLevels = 1;
-    for (int i = 0; i < 3; ++i)
+    ID3D12Resource *const inputs[4] = { native, nr_in, nr_out, raw };
+    for (ID3D12Resource *input : inputs)
     {
-        h.dev->CreateShaderResourceView(i == 0 ? native : (i == 1 ? nr_in : nr_out),
-                                        &sd, cpu);
+        h.dev->CreateShaderResourceView(input, &sd, cpu);
         cpu.ptr += stride;
     }
 
@@ -4448,24 +4470,28 @@ static void BindResidualDescriptors(ID3D12Resource *native, ID3D12Resource *nr_i
     g_res_in_bound = nr_in;
     g_res_out_bound = nr_out;
     g_res_dst_bound = dst;
+    g_res_raw_bound = raw;
 }
 
 // Compose native + (nr_out - nr_in) * strength at full resolution.
 // native must be in NON_PIXEL_SHADER_RESOURCE, dst and (optionally) nr_out
 // in UNORDERED_ACCESS - the caller owns the barriers, as with ScaleColorInto.
+// raw/strength2: DLAA's correction (nr_in - raw) on top, see kResidualHlsl.
 static void ResidualCompose(ID3D12Resource *native, ID3D12Resource *nr_in,
                             ID3D12Resource *nr_out, UINT w, UINT h_,
-                            ID3D12Resource *dst, float strength)
+                            ID3D12Resource *dst, float strength,
+                            ID3D12Resource *raw = nullptr, float strength2 = 0.0f)
 {
-    BindResidualDescriptors(native, nr_in, nr_out, dst);
+    if (raw == nullptr) { raw = nr_in; strength2 = 0.0f; }
+    BindResidualDescriptors(native, nr_in, nr_out, dst, raw);
     ID3D12DescriptorHeap *heaps[] = { g_residual_heap };
     h.list->SetDescriptorHeaps(1, heaps);
     h.list->SetComputeRootSignature(g_residual_rs);
     h.list->SetPipelineState(g_residual_pso);
-    UINT32 rc[3] = { w, h_, 0 };
-    float str = strength;
-    memcpy(&rc[2], &str, sizeof(float));
-    h.list->SetComputeRoot32BitConstants(0, 3, rc, 0);
+    UINT32 rc[4] = { w, h_, 0, 0 };
+    memcpy(&rc[2], &strength, sizeof(float));
+    memcpy(&rc[3], &strength2, sizeof(float));
+    h.list->SetComputeRoot32BitConstants(0, 4, rc, 0);
     D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_residual_heap->GetGPUDescriptorHandleForHeapStart();
     h.list->SetComputeRootDescriptorTable(1, gpu);
     h.list->Dispatch((w + 7) / 8, (h_ + 7) / 8, 1);
@@ -6715,7 +6741,28 @@ static bool EvaluateVideo(VideoState &v, int reset, UINT64 *submitted = nullptr)
     // resolution, and colour has to be scaled down into nr_in first.
     const UINT nw = v.nr_small ? v.nr_w : cw;
     const UINT nh = v.nr_small ? v.nr_h : ch;
-    if (v.nr_small)
+    // DLAA under Boost (dlaa.inl) made the work-size frame already, anti-
+    // aliased: the network takes that instead of shrinking the frame again.
+    const bool dlaa_fed = v.nr_small && g_dlaa_feeds_nr && g_dlaa_feed_out != nullptr;
+    if (dlaa_fed)
+    {
+        D3D12_RESOURCE_BARRIER pre[] = {
+            Transition(v.nr_in, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                       D3D12_RESOURCE_STATE_COPY_DEST),
+            Transition(g_dlaa_feed_out, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                       D3D12_RESOURCE_STATE_COPY_SOURCE),
+        };
+        h.list->ResourceBarrier(_countof(pre), pre);
+        h.list->CopyResource(v.nr_in, g_dlaa_feed_out);
+        D3D12_RESOURCE_BARRIER post[] = {
+            Transition(v.nr_in, D3D12_RESOURCE_STATE_COPY_DEST,
+                       D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+            Transition(g_dlaa_feed_out, D3D12_RESOURCE_STATE_COPY_SOURCE,
+                       D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+        };
+        h.list->ResourceBarrier(_countof(post), post);
+    }
+    else if (v.nr_small)
     {
         D3D12_RESOURCE_BARRIER to_uav = Transition(
             v.nr_in, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
@@ -6842,8 +6889,12 @@ static bool EvaluateVideo(VideoState &v, int reset, UINT64 *submitted = nullptr)
         if (StabRequested() && StabilizeEdit(v, nw, nh, reset != 0))
             edit = g_stab.out;
         if (v.residual)
+            // With DLAA's result as nr_in, its own correction (nr_in - the
+            // plain downscale) rides the same pass at DLAA's strength.
             ResidualCompose(v.color.tex, v.nr_in, edit, cw, ch, v.output,
-                            v.residual_strength);
+                            v.residual_strength,
+                            dlaa_fed ? g_dlaa_feed_raw : nullptr,
+                            dlaa_fed ? g_dlaa_feed_strength : 0.0f);
         else
             ScaleColorInto(edit, nw, nh, v.output, cw, ch, 1);
         if (edit != v.nr_out) StabAfterCompose();
@@ -7255,6 +7306,23 @@ static int ReadVideoMessage(VideoState &v, VideoFrameHeader &fh, std::vector<BYT
                 : fh.index >= 10 && fh.index <= 13 ? kModels[fh.index - 10]
                 : "unknown - the runtime's choice");
         g_dlaa_preset_ui = static_cast<int>(fh.index);
+        // `reserved`: DLAA's strength under Boost in 1/1000ths (0 = unset,
+        // the old client); `reset` bit 0: the motion-confidence mask.
+        if (fh.reserved != 0)
+        {
+            const float strength = (std::min)(1000u, fh.reserved) / 1000.0f;
+            if (strength != g_dlaa_strength_ui) Log("[dlaa] strength under Boost: %.2f", strength);
+            g_dlaa_strength_ui = strength;
+        }
+        const bool cost_mask = (fh.reset & 1u) != 0;
+        if (cost_mask != g_dlaa_cost_wanted)
+        {
+            Log("[dlaa] motion-confidence mask: %s", cost_mask ? "on" : "off");
+            g_dlaa_cost_wanted = cost_mask;
+            // NVOFA writes its cost only when asked at creation: rebuilt on
+            // the next frame with the buffer, or without it.
+            CloseNvofa();
+        }
         return 17;
     }
     if (fh.magic == BADGE_MAGIC)
@@ -7302,7 +7370,7 @@ static void ReleaseVideoTextures(VideoState &v)
     // BindResidualDescriptors skip the rebuild (pointer equality) and
     // dispatch against freed GPU memory (audit C++ H1).
     g_res_native_bound = g_res_in_bound = nullptr;
-    g_res_out_bound = g_res_dst_bound = nullptr;
+    g_res_out_bound = g_res_dst_bound = g_res_raw_bound = nullptr;
     // And the split-view wipe: its UAV is cached by v.output's address, so a
     // new output landing at the freed one would have the wipe's clear write
     // through a descriptor of the released texture.
@@ -8391,8 +8459,13 @@ static int RunVideo()
         // submission; queue order puts it before the neural pass and the
         // present, so the tail tokens below keep their order. Every frame:
         // a frame with nothing new may still need the capture put back.
+        // When the network runs on this frame under Boost, DLAA hands it the
+        // work-size result instead of composing the full frame.
+        const bool nr_consumes = (fh.reserved & FRAME_FLAG_BYPASS) == 0 &&
+                                 h.feature != nullptr && v.nr_small && v.residual;
         if (!RunDlaa(v, color_written, color_written && !source_fresh,
-                     frame == 0 || fh.reset != 0 || (stall_pending && source_fresh)))
+                     frame == 0 || fh.reset != 0 || (stall_pending && source_fresh),
+                     nr_consumes))
             return 9;
         if (!warmup_done)
         {

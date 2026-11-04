@@ -1111,12 +1111,37 @@ What a capture gives DLSS, and what it does not:
   proxy under it; the worker refuses and the switch goes back off.
 
 **Boost.** Without Boost DLAA runs at the frame's size. With Boost it runs at
-Boost's work size, on the frame reduced the way NR's input is, and its
-correction is composed onto the native frame with NR's residual pass
-(`native + DLAA(small) - small`): the cost of a work-size DLSS pass instead of a
-full-size one, and the native frame keeps its sharpness. The anti-aliasing is
-correspondingly coarser - the same trade Boost makes for the network; switch
-Boost off for full-resolution DLAA.
+Boost's work size, on the frame reduced the way NR's input is. When the neural
+pass runs on the frame, it is handed that work-size result directly
+(`g_dlaa_feeds_nr`, EvaluateVideo) and NR's residual composite adds DLAA's
+correction (`nr_in - raw`, raw being the plain downscale) next to the network's,
+each at its own strength: one downscale and one full-frame composite per frame
+instead of two of each. With the neural pass off, DLAA composes the full frame
+itself with the same pass (`native + (DLAA(small) - small) * strength`). The
+native frame keeps its sharpness either way; the anti-aliasing is coarser, and
+the bilinear-upscaled correction softens edges a little - **DLAA strength
+(Boost)** in the menu (0-100%, `dlaa_strength`) trades that off. Switch Boost
+off for full-resolution DLAA, where the slider is not shown: the result is
+DLSS's own and it would change nothing.
+
+**Cost.** Two GPU timestamps bracket every DLAA submission (its own query heap,
+always on, unlike the `NS_PHASE` stages); the worker logs
+`[dlaa] cost <avg> ms avg, <max> ms max, <n> frames` every two seconds and the
+line under the switch shows the average - what the models and Boost on/off are
+compared by. Measured on an RTX 4060 Laptop at 2560x1600 (test build 4, before
+the Boost rework): the whole frame fell from ~85 to ~45 fps with DLAA at full
+size and NR on; DLAA's own share is what the cost line now isolates.
+
+**Ghosting.** DLSS gets a flat depth and a 320x200 motion field stretched up,
+so the edges of moving objects can trail. Two masks tell it to trust the
+current frame instead of its history (both go into the one bias mask):
+**Protect the interface in DLAA** (`dlaa_ui_protect`, on by default) draws the
+still-interface rectangles the client finds, as FG's protection does; **Trust
+the frame where motion is unsure** (`dlaa_motion_mask`, off by default,
+experimental) asks NVOFA for its per-block cost buffer and marks the blocks
+whose cost is above a threshold (`NS_DLAA_COST_T`, default 32 of 255). The
+mask is rebuilt on every evaluation while the cost pass is on; with the
+rectangles alone it is redrawn only when they change.
 
 **When it runs.** On every frame the capture renewed. A frame the desktop did
 not change keeps DLAA's last result. A picture presented again unchanged (#183)
@@ -1140,9 +1165,13 @@ and shows on a still desktop too. Without one from the client,
 
 **In the menu.** A DLAA tile beside FG on the main page and in the collapsed
 bar; under **Network** the switch, a line saying what DLAA is doing - starting,
-running at which size and model (and "via the NVIDIA driver" when NGX Core
-answered), or why the last attempt did not start - read from the worker's
-`[dlaa]` lines, and the model picker. A hotkey exists with no key: the user
+running at which size, with which model ("K (auto)" when Auto resolved to it:
+the 310 runtime's DLAA default, per NVIDIA's header; a runtime of another
+version shows "auto" alone) and at what cost, "via the NVIDIA driver" when NGX
+Core answered, or why the last attempt did not start - read from the worker's
+`[dlaa]` lines; the model picker; under Boost the strength slider; and the two
+mask switches. With NR off and DLAA on, the counter shows DLAA's rate as
+"DLAA 55.0" (the loop records every processed frame then). A hotkey exists with no key: the user
 gives it one under Keys (`hotkeys.OPTIONAL_COMMANDS`). Every refusal is logged as `[dlaa] off: ...`
 - a missing DLL, a refused create, a caught fault, HDR - and the client turns
 the switch back off once per attempt with an alert, the way it does for FG
@@ -1159,12 +1188,13 @@ to the archive means adding it to `MANDATORY_FILES` and
 `REQUIRED_RUNTIME_ARTIFACTS` in `build_release_zip.py`, pinning it in the
 manifest and naming it in THIRD-PARTY-NOTICES.md.
 
-**Unmeasured.** The path was written against the NGX 310 headers in
-`native/include/` and type-checked, not run: no frame-time cost, no quality
-comparison and no card is validated yet, and whether the direct route or NGX
-Core answers on a given driver is unknown. `NS_PHASE=1` does not break DLAA out
-as a stage of its own: it shows only in the frame total, and its GPU time sits
-outside the `eval` timestamps.
+**Measured so far.** On an RTX 4060 Laptop (driver 32.0.16.2101, Windows 11,
+2560x1600, test build 4) `nvngx_dlss.dll` from the DLSS SDK started directly on
+the first try, ran with Boost on and off, through eight on/off switches and NR
+off, and shut down cleanly. No quality comparison exists yet, and the Boost
+rework, the strength, the cost line and the masks above have not run on a GPU
+at the time of writing. `NS_PHASE=1` does not list DLAA as a stage: the
+`[dlaa] cost` line is its measurement.
 
 ## Runtimes and the libraries folder
 

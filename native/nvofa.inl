@@ -228,9 +228,10 @@ static bool EnsureNvofa(UINT width, UINT height)
     // for the offline experiment (tests/experiment_nvofa_confidence.py);
     // ordinary runs skip the per-frame cost computation.
     char cost_env[8] = {};
-    const bool want_cost = GetEnvironmentVariableA("NS_NVOFA_COST", cost_env,
-                                                    sizeof(cost_env)) > 0
-                           && cost_env[0] == '1';
+    // DLAA's motion-confidence mask (dlaa.inl) is the one runtime consumer.
+    const bool want_cost = (GetEnvironmentVariableA("NS_NVOFA_COST", cost_env,
+                                                     sizeof(cost_env)) > 0
+                            && cost_env[0] == '1') || g_dlaa_cost_wanted;
     params.enableOutputCost = want_cost ? NV_OF_TRUE : NV_OF_FALSE;
     params.inputBufferFormat = NV_OF_BUFFER_FORMAT_GRAYSCALE8;
     status = f.api.nvOFInit(f.session, &params);
