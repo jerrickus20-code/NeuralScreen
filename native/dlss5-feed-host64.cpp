@@ -2197,10 +2197,7 @@ static constexpr uint32_t kUiRectsMax = 32;
 // from an older client means both.
 static constexpr uint32_t UI_RECTS_FOR_FG = 0x1u;
 static constexpr uint32_t UI_RECTS_FOR_DLAA = 0x2u;
-static inline bool UiRectsFor(uint32_t pass)
-{
-    return g_ui_rects.count > 0 && (g_ui_rects.reserved0 == 0 || (g_ui_rects.reserved0 & pass) != 0);
-}
+static bool UiRectsFor(uint32_t pass);   // defined with g_ui_rects, below
 struct VideoUiRectsCmd
 {
     uint32_t magic, count, reserved0, reserved1;
@@ -4671,6 +4668,10 @@ static VideoPerPassCmd         g_per_pass_cmd = {};
 static VideoLensCmd            g_lens_cmd = {};
 static VideoBadgeCmd           g_badge_cmd = {};
 static VideoUiRectsCmd         g_ui_rects = {};   // count 0: nothing protected
+static bool UiRectsFor(uint32_t pass)
+{
+    return g_ui_rects.count > 0 && (g_ui_rects.reserved0 == 0 || (g_ui_rects.reserved0 & pass) != 0);
+}
 // Gray downsample (GRAY): write luminance (flow size) into a client mapping.
 static HANDLE                  g_gray_file = nullptr;   // client's mapping handle
 static BYTE                   *g_gray_map = nullptr;    // mapped view
